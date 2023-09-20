@@ -11,6 +11,12 @@
 
 struct cpuidle_device;
 
+DECLARE_HOOK(android_vh_cpu_idle_enter_prio,
+	TP_PROTO(int *state, struct cpuidle_device *dev),
+	TP_ARGS(state, dev))
+DECLARE_HOOK(android_vh_cpu_idle_exit_prio,
+	TP_PROTO(int state, struct cpuidle_device *dev),
+	TP_ARGS(state, dev))
 DECLARE_HOOK(android_vh_cpu_idle_enter,
 	TP_PROTO(int *state, struct cpuidle_device *dev),
 	TP_ARGS(state, dev))
