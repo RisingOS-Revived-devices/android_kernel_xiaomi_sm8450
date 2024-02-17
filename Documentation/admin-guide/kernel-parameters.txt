@@ -4594,6 +4594,14 @@
 			Format: { 0 | 1 }
 			See arch/parisc/kernel/pdc_chassis.c
 
+	pelt=		[KNL] Boot-time parameter changing the PELT half life in ms
+			Format: <int>
+			32: Set the half life to 32ms
+			16: Set the half life to 16ms
+			12: Set the half life to 12ms
+			8: Set the half life to 8ms
+			default: 32
+
 	percpu_alloc=	Select which percpu first chunk allocator to use.
 			Currently supported values are "embed" and "page".
 			Archs may support subset or none of the	selections.
