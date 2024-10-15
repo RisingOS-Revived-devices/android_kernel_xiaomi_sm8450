@@ -51,6 +51,9 @@ unsigned int sysctl_sched_wake_up_idle[2];
 unsigned int sysctl_input_boost_ms;
 unsigned int sysctl_input_boost_freq[WALT_NR_CPUS];
 unsigned int sysctl_sched_boost_on_input;
+unsigned int sysctl_powerkey_input_boost_ms;
+unsigned int sysctl_powerkey_input_boost_freq[WALT_NR_CPUS];
+unsigned int sysctl_powerkey_sched_boost_on_input;
 unsigned int sysctl_sched_early_up[MAX_MARGIN_LEVELS];
 unsigned int sysctl_sched_early_down[MAX_MARGIN_LEVELS];
 
@@ -1339,6 +1342,33 @@ static struct ctl_table input_boost_sysctls[] = {
 	{
 		.procname	= "sched_boost_on_input",
 		.data		= &sysctl_sched_boost_on_input,
+		.maxlen		= sizeof(unsigned int),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec_minmax,
+		.extra1		= SYSCTL_ZERO,
+		.extra2		= SYSCTL_INT_MAX,
+	},
+	{
+		.procname	= "powerkey_input_boost_ms",
+		.data		= &sysctl_powerkey_input_boost_ms,
+		.maxlen		= sizeof(unsigned int),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec_minmax,
+		.extra1		= SYSCTL_ZERO,
+		.extra2		= &one_hundred_thousand,
+	},
+	{
+		.procname	= "powerkey_input_boost_freq",
+		.data		= &sysctl_powerkey_input_boost_freq,
+		.maxlen		= sizeof(unsigned int) * 8,
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec_minmax,
+		.extra1		= SYSCTL_ZERO,
+		.extra2		= SYSCTL_INT_MAX,
+	},
+	{
+		.procname	= "powerkey_sched_boost_on_input",
+		.data		= &sysctl_powerkey_sched_boost_on_input,
 		.maxlen		= sizeof(unsigned int),
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec_minmax,

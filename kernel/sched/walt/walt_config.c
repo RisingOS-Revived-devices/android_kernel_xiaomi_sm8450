@@ -34,6 +34,8 @@ void walt_config(void)
 	sysctl_sched_coloc_busy_hyst_max_ms = 5000;
 	sched_ravg_window = DEFAULT_SCHED_RAVG_WINDOW;
 	sysctl_input_boost_ms = 40;
+	sysctl_powerkey_input_boost_ms = 40;
+	sysctl_powerkey_sched_boost_on_input = 1;
 	sysctl_sched_min_task_util_for_boost = 51;
 	sysctl_sched_min_task_util_for_uclamp = 51;
 	sysctl_sched_min_task_util_for_colocation = 35;
