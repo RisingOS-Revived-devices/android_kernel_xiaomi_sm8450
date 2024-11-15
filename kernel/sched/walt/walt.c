@@ -2249,7 +2249,7 @@ static void update_history(struct rq *rq, struct task_struct *p,
 	u16 *hist_util = &wts->sum_history_util[0];
 	int i;
 	u32 max = 0, avg, demand;
-	u64 sum = 0;
+	u64 sum = 0, wma = 0, ewma = 0;
 	u16 demand_scaled, pred_demand_scaled, runtime_scaled;
 	u16 trailblazer_demand = 0;
 	struct walt_rq *wrq = &per_cpu(walt_rq, cpu_of(rq));
@@ -2273,9 +2273,15 @@ static void update_history(struct rq *rq, struct task_struct *p,
 	}
 
 	for (i = 0; i < RAVG_HIST_SIZE; i++) {
+		/* age 0 is the newest sample, it sits just before cidx */
+		int age = (wts->cidx + RAVG_HIST_SIZE - 1 - i) % RAVG_HIST_SIZE;
+
 		sum += hist[i];
 		if (hist[i] > max)
 			max = hist[i];
+
+		wma += (u64)hist[i] * (RAVG_HIST_SIZE - age);
+		ewma += (u64)hist[i] << (RAVG_HIST_SIZE - age - 1);
 	}
 
 	wts->sum = 0;
@@ -2290,6 +2296,29 @@ static void update_history(struct rq *rq, struct task_struct *p,
 		break;
 	case WINDOW_STATS_AVG:
 		demand = avg;
+		break;
+	case WINDOW_STATS_WMA:
+		/*
+		 * WMA stands for weighted moving average. It helps to
+		 * smooth load curve and react faster while ramping down
+		 * comparing with basic average policy. When ramping up
+		 * it prevents from a spurious big "recent" sample that
+		 * may lead to overshooting if it is bigger then AVG of
+		 * history demand.
+		 *
+		 * See below example (4 HS):
+		 *
+		 * WMA = (P0 * 4 + P1 * 3 + P2 * 2 + P3 * 1) / (4 + 3 + 2 + 1)
+		 *
+		 * This is done for power saving. Means when load disappears
+		 * or becomes low, this algorithm caches a real bottom load
+		 * faster (because of weights) then taking AVG values.
+		 */
+		demand = (u32)div64_u64(wma, (RAVG_HIST_SIZE * (RAVG_HIST_SIZE + 1)) / 2);
+		break;
+	case WINDOW_STATS_EWMA:
+		/* EWMA is an exponential version of the WMA algorithm. */
+		demand = (u32)div64_u64(ewma, (1 << RAVG_HIST_SIZE) - 1);
 		break;
 	default:
 		demand = max(avg, runtime);

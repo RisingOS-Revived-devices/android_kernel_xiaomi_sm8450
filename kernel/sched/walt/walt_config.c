@@ -26,7 +26,7 @@ void walt_config(void)
 	sysctl_sched_group_upmigrate_pct = 100;
 	sysctl_sched_group_downmigrate_pct = 95;
 	sysctl_sched_task_unfilter_period = 100000000;
-	sysctl_sched_window_stats_policy = WINDOW_STATS_MAX_RECENT_AVG;
+	sysctl_sched_window_stats_policy = WINDOW_STATS_EWMA;
 	sysctl_sched_ravg_window_nr_ticks = (HZ / NR_WINDOWS_PER_SEC);
 	sched_load_granule = DEFAULT_SCHED_RAVG_WINDOW / NUM_LOAD_INDICES;
 	sysctl_sched_coloc_busy_hyst_enable_cpus = 112;

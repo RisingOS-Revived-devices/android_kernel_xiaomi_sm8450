@@ -12,13 +12,14 @@
 
 static int neg_five = -5;
 static int three = 3;
-static int four = 4;
+static int __maybe_unused four = 4;
 static int five = 5;
 static int two_hundred_fifty_five = 255;
 static unsigned int ns_per_sec = NSEC_PER_SEC;
 static unsigned int one_hundred_thousand = 100000;
 static unsigned int two_hundred_million = 200000000;
 static int __maybe_unused two = 2;
+static int __maybe_unused six = 6;
 static int one_hundred = 100;
 static int one_thousand = 1000;
 static int one_thousand_twenty_four = 1024;
@@ -1394,7 +1395,7 @@ static struct ctl_table walt_table[] = {
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec_minmax,
 		.extra1		= SYSCTL_ZERO,
-		.extra2		= &four,
+		.extra2		= &six,
 	},
 	{
 		.procname	= "sched_group_upmigrate",
