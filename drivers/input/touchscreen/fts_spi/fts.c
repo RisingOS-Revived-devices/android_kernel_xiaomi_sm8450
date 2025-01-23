@@ -2570,9 +2570,6 @@ static int fts_set_report_rate(struct fts_ts_info *info, u32 rate)
 	int res = 0;
 	u8 rate_cmd[3] = { 0xC0, 0x20, 0x00 };
 
-	if (!info->enable_touch_raw)
-		return res;
-
 	if (info->sensor_sleep == true || info->resume_bit == 0)
 		return 0;
 
@@ -5470,6 +5467,9 @@ static int fts_set_cur_value(void *private, enum touch_mode mode, int value)
 	case TOUCH_MODE_NONUI_MODE:
 		fts_info->nonui_status = value;
 		break;
+	case TOUCH_MODE_REPORT_RATE:
+		fts_set_report_rate(fts_info, value);
+		goto exit;
 	default:
 		logError(1,
 			 "handler got mode %d with value %d, not implemented",
@@ -5479,6 +5479,7 @@ static int fts_set_cur_value(void *private, enum touch_mode mode, int value)
 
 	schedule_work(&fts_info->switch_mode_work);
 
+exit:
 	return 0;
 }
 
@@ -5625,10 +5626,10 @@ static void fts_resume_work(struct work_struct *work)
 	if (!info->enable_touch_raw && info->enable_thp_fw) {
 		fts_enable_thp_onoff(0);
 	}
+	if (info->reprot_rate >= 0) {
+		fts_set_report_rate(info, info->reprot_rate);
+	}
 	if (info->enable_touch_raw) {
-		if (info->enable_thp_fw && info->reprot_rate >= 0) {
-			fts_set_report_rate(info, info->reprot_rate);
-		}
 		fts_up_interrups_mode(info, 1);
 	}
 
