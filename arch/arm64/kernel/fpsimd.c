@@ -466,6 +466,9 @@ static void fpsimd_save(void)
 	bool save_ffr;
 	unsigned int vl;
 
+	if (unlikely(!last->st))
+		return;
+
 	WARN_ON(!system_supports_fpsimd());
 	WARN_ON(!have_cpu_fpsimd_context());
 
