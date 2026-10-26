@@ -18,5 +18,6 @@ int ksu_handle_toolkit_reboot(int magic2, unsigned int cmd, void __user *arg);
 void ksu_toolkit_uname_reset(void);
 
 extern uint32_t ksuver_override;
+extern uint32_t ksuuapi_override;
 
 #endif // __KSU_H_SUPERCALL_INTERNAL

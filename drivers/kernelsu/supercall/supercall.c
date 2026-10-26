@@ -27,6 +27,8 @@
 extern struct static_key_false susfs_is_uname_spoof_buffer_set;
 #endif
 uint32_t ksuver_override = 0;
+// UAPI the crowned manager requires, 0 to report ours
+uint32_t ksuuapi_override = 0;
 
 #define KSU_DRIVER_PERMISSION_SU_SESSION (1UL << 0)
 

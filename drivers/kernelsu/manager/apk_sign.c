@@ -328,10 +328,59 @@ int get_pkg_from_apk_dir_path(char *pkg, const char *path)
 	return 0;
 }
 
+struct ksu_manager_sign {
+	unsigned int size;
+	const char *hash;
+	u32 version_code; // reported as our version while crowned, 0 keeps ours
+	u32 uapi; // UAPI its ksud and app require exactly, 0 keeps ours
+};
+
+// Other managers' signing certificates. Each ksud skips every boot stage
+// unless our UAPI equals its own, so report the one it was built for.
+static const struct ksu_manager_sign ksu_known_managers[] = {
+	{ 0x3e6, "79e590113c4c4c0c222978e413a5faa801666957b1212a328e46c00c69821bf7", 0, 5 }, // KernelSU-Next v3.4.2
+	{ 0x33b, "c371061b19d8c7d7d6133c6a9bafe198fa944e50c1b31c9d8daa8d7f1fc2d2d6", 32680, 5 }, // tiann/KernelSU v3.3.1
+	{ 0x363, "4359c171f32543394cbc23ef908c4bb94cad7c8087002ba164c8230948c21549", 32704, 6 }, // backslashxx v3.3.1
+	{ 0x375, "484fcba6e6c43b1fb09700633bf2fb4758f13cb0b2f4457b80d075084b26c588", 32732, 6 }, // KOWX712/KernelSU
+	{ 0x381, "52d52d8c8bfbe53dc2b6ff1c613184e2c03013e090fe8905d8e3d5dc2658c2e4", 33208, 6 }, // WKSU v3.1.2
+	{ 0x377, "d3469712b6214462764a1d8d3e5cbe1d6819a0b629791b9f4101867821f1df64", 35171, 4 }, // ReSukiSU v4.2.0-rc3
+	{ 0x35c, "947ae944f3de4ed4c21a7e4f7953ecf351bfa2b36239da37a34111ad29993eef", 41068, 6 }, // SukiSU-Ultra v4.2.1-r2
+};
+
+static u32 matched_manager_version;
+static u32 matched_manager_uapi;
+
+u32 ksu_get_matched_manager_version(void)
+{
+	return matched_manager_version;
+}
+
+u32 ksu_get_matched_manager_uapi(void)
+{
+	return matched_manager_uapi;
+}
+
 bool is_manager_apk(char *path)
 {
 	const char *p = KSU_NEXT_MANAGER_LIST;
+	int i;
 
+	matched_manager_version = 0;
+	matched_manager_uapi = 0;
+
+	for (i = 0; i < ARRAY_SIZE(ksu_known_managers); i++) {
+		const struct ksu_manager_sign *sign = &ksu_known_managers[i];
+
+		if (check_v2_signature(path, sign->size, sign->hash)) {
+			pr_info("KernelSU: matched manager APK: %s (size=0x%x, uapi=%u)\n",
+				path, sign->size, sign->uapi);
+			matched_manager_version = sign->version_code;
+			matched_manager_uapi = sign->uapi;
+			return true;
+		}
+	}
+
+	// KSU_NEXT_MANAGER_LIST managers are built from this tree: no overrides.
 	while (*p) {
 		unsigned int size;
 		char hash[65] = {0};

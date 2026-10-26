@@ -18,12 +18,18 @@ static inline void track_throne(bool prune_only)
 {
     (void)prune_only;
 }
+
+static inline void ksu_crown_before_boot_stages(void)
+{
+}
 #else
 void ksu_throne_tracker_init(void);
 
 void ksu_throne_tracker_exit(void);
 
 void track_throne(bool prune_only);
+
+void ksu_crown_before_boot_stages(void);
 
 /*
  * small helper to check if lock is held / file stability

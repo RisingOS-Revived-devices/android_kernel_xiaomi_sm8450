@@ -24,6 +24,7 @@ extern struct work_struct susfs_extra_works;
 #include "runtime/ksud_boot.h"
 #include "feature/kernel_umount.h"
 #include "manager/manager_identity.h"
+#include "manager/throne_tracker.h"
 #include "selinux/selinux.h"
 #include "infra/file_wrapper.h"
 #include "hook/tp_marker.h"
@@ -54,6 +55,10 @@ static int do_get_info(void __user *arg)
 {
     struct ksu_get_info_cmd cmd = { .version = KERNEL_SU_VERSION, .flags = 0 };
 
+    // ksud (root) asks before each boot stage; answer for its own manager.
+    if (current_uid().val == 0)
+        ksu_crown_before_boot_stages();
+
 #ifdef MODULE
     cmd.flags |= KSU_GET_INFO_FLAG_LKM;
     if (ksu_bundled) {
@@ -75,7 +80,7 @@ static int do_get_info(void __user *arg)
         cmd.flags |= KSU_GET_INFO_FLAG_PREINIT;
     }
     cmd.features = KSU_FEATURE_MAX;
-    cmd.uapi_version = KERNEL_SU_UAPI_VERSION;
+    cmd.uapi_version = ksuuapi_override ? ksuuapi_override : KERNEL_SU_UAPI_VERSION;
 
     if (copy_to_user(arg, &cmd, sizeof(cmd))) {
         pr_err("get_version: copy_to_user failed\n");
