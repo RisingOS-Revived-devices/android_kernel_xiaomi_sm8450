@@ -59,6 +59,7 @@ static atomic_t charger_mode = ATOMIC_INIT(-1);
 #endif
 
 static struct mi_thermal_device mi_thermal_dev;
+static struct mi_thermal_device mi_powersave_dev;
 static int screen_state = 0;
 static int screen_light = 0;
 #if IS_ENABLED(CONFIG_HAVE_MULTI_SCREEN)
@@ -82,6 +83,8 @@ static atomic_t flash_state = ATOMIC_INIT(0);
 static atomic_t thermal_max_brightness = ATOMIC_INIT(0);
 static atomic_t modem_rate = ATOMIC_INIT(0);
 static atomic_t modem_level = ATOMIC_INIT(0);
+static atomic_t powersave_mode = ATOMIC_INIT(0);
+static atomic_t power_level = ATOMIC_INIT(0);
 static char boost_buf[128];
 const char *board_sensor;
 static char board_sensor_temp[128];
@@ -439,6 +442,42 @@ static ssize_t thermal_modem_level_store(struct device *dev,
 
 static DEVICE_ATTR(modem_level, 0664, thermal_modem_level_show,
 		   thermal_modem_level_store);
+
+static ssize_t thermal_powersave_mode_show(struct device *dev,
+					   struct device_attribute *attr,
+					   char *buf)
+{
+	return snprintf(buf, PAGE_SIZE, "%d\n", atomic_read(&powersave_mode));
+}
+
+static ssize_t thermal_powersave_mode_store(struct device *dev,
+					    struct device_attribute *attr,
+					    const char *buf, size_t len)
+{
+	atomic_set(&powersave_mode, simple_strtol(buf, NULL, 10));
+	return len;
+}
+
+static DEVICE_ATTR(powersave_mode, 0664, thermal_powersave_mode_show,
+		   thermal_powersave_mode_store);
+
+static ssize_t thermal_power_level_show(struct device *dev,
+					struct device_attribute *attr,
+					char *buf)
+{
+	return snprintf(buf, PAGE_SIZE, "%d\n", atomic_read(&power_level));
+}
+
+static ssize_t thermal_power_level_store(struct device *dev,
+					 struct device_attribute *attr,
+					 const char *buf, size_t len)
+{
+	atomic_set(&power_level, simple_strtol(buf, NULL, 10));
+	return len;
+}
+
+static DEVICE_ATTR(power_level, 0664, thermal_power_level_show,
+		   thermal_power_level_store);
 static ssize_t
 thermal_board_sensor_second_temp_show(struct device *dev,
 				      struct device_attribute *attr, char *buf)
@@ -803,6 +842,14 @@ static struct attribute *mi_thermal_dev_attr_group[] = {
 #endif
 	NULL,
 };
+
+/* /sys/class/thermal/power_save, as in the stock module: mi_thermald writes power_level */
+static struct attribute *mi_powersave_dev_attr_group[] = {
+	&dev_attr_powersave_mode.attr,
+	&dev_attr_power_level.attr,
+	NULL,
+};
+
 static const char *get_screen_state_name(int mode)
 {
 	switch (mode) {
@@ -995,11 +1042,35 @@ static void create_thermal_message_node(void)
 			return;
 		}
 	}
+	if (!mi_powersave_dev.class && cls) {
+		mi_powersave_dev.class = cls;
+		mi_powersave_dev.dev =
+			device_create(mi_powersave_dev.class, NULL, 'P', NULL,
+				      "power_save");
+		if (IS_ERR_OR_NULL(mi_powersave_dev.dev)) {
+			pr_err("%s create power_save dev err\n", __func__);
+			mi_powersave_dev.dev = NULL;
+			mi_powersave_dev.class = NULL;
+			return;
+		}
+		mi_powersave_dev.attrs.attrs = mi_powersave_dev_attr_group;
+		ret = sysfs_create_group(&mi_powersave_dev.dev->kobj,
+					 &mi_powersave_dev.attrs);
+		if (ret)
+			pr_err("%s ERROR: Cannot create power_save sysfs structure!:%d\n",
+			       __func__, ret);
+	}
 }
 
 static void destroy_thermal_message_node(void)
 {
 	pr_err("%s:destroy_thermal_message_node", __func__);
+	if (mi_powersave_dev.class) {
+		sysfs_remove_group(&mi_powersave_dev.dev->kobj,
+				   &mi_powersave_dev.attrs);
+		device_destroy(mi_powersave_dev.class, 'P');
+		mi_powersave_dev.class = NULL;
+	}
 	sysfs_remove_group(&mi_thermal_dev.dev->kobj, &mi_thermal_dev.attrs);
 	if (NULL != mi_thermal_dev.class) {
 		device_destroy(mi_thermal_dev.class, 'H');
