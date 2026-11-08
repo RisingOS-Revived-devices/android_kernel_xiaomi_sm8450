@@ -113,8 +113,7 @@ enum {
 	BINDER_DEBUG_PRIORITY_CAP           = 1U << 13,
 	BINDER_DEBUG_SPINLOCKS              = 1U << 14,
 };
-static uint32_t binder_debug_mask = BINDER_DEBUG_USER_ERROR |
-	BINDER_DEBUG_FAILED_TRANSACTION | BINDER_DEBUG_DEAD_TRANSACTION;
+static uint32_t binder_debug_mask = 0;
 module_param_named(debug_mask, binder_debug_mask, uint, 0644);
 
 char *binder_devices_param = CONFIG_ANDROID_BINDER_DEVICES;
@@ -136,6 +135,7 @@ static int binder_set_stop_on_user_error(const char *val,
 module_param_call(stop_on_user_error, binder_set_stop_on_user_error,
 	param_get_int, &binder_stop_on_user_error, 0644);
 
+#ifdef DEBUG
 static __printf(2, 3) void binder_debug(int mask, const char *format, ...)
 {
 	struct va_format vaf;
@@ -149,10 +149,16 @@ static __printf(2, 3) void binder_debug(int mask, const char *format, ...)
 		va_end(args);
 	}
 }
+#else
+static inline __printf(2, 3) void binder_debug(int mask, const char *format, ...)
+{
+}
+#endif
 
 #define binder_txn_error(x...) \
 	binder_debug(BINDER_DEBUG_FAILED_TRANSACTION, x)
 
+#ifdef DEBUG
 static __printf(1, 2) void binder_user_error(const char *format, ...)
 {
 	struct va_format vaf;
@@ -169,6 +175,13 @@ static __printf(1, 2) void binder_user_error(const char *format, ...)
 	if (binder_stop_on_user_error)
 		binder_stop_on_user_error = 2;
 }
+#else
+static inline __printf(1, 2) void binder_user_error(const char *format, ...)
+{
+	if (binder_stop_on_user_error)
+		binder_stop_on_user_error = 2;
+}
+#endif
 
 #define binder_set_extended_error(ee, _id, _command, _param) \
 	do { \
@@ -2775,7 +2788,7 @@ static void binder_cleanup_deferred_txn_lists(struct list_head *sgc_head,
 static int binder_defer_copy(struct list_head *sgc_head, binder_size_t offset,
 			     const void __user *sender_uaddr, size_t length)
 {
-	struct binder_sg_copy *bc = kzalloc(sizeof(*bc), GFP_KERNEL);
+	struct binder_sg_copy *bc = kmalloc(sizeof(*bc), GFP_KERNEL);
 
 	if (!bc)
 		return -ENOMEM;
@@ -2818,7 +2831,7 @@ static int binder_defer_copy(struct list_head *sgc_head, binder_size_t offset,
 static int binder_add_fixup(struct list_head *pf_head, binder_size_t offset,
 			    binder_uintptr_t fixup, size_t skip_size)
 {
-	struct binder_ptr_fixup *pf = kzalloc(sizeof(*pf), GFP_KERNEL);
+	struct binder_ptr_fixup *pf = kmalloc(sizeof(*pf), GFP_KERNEL);
 	struct binder_ptr_fixup *tmppf;
 
 	if (!pf)

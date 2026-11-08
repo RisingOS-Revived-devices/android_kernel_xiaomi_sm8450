@@ -10,6 +10,7 @@
 #include <linux/kernel.h>
 #include <linux/init.h>
 #include <linux/module.h>
+#include <linux/sizes.h>
 #include <linux/slab.h>
 #include <linux/quotaops.h>
 
@@ -51,6 +52,27 @@ static int qtree_dqstr_in_blk(struct qtree_mem_dqinfo *info)
 {
 	return (info->dqi_usable_bs - sizeof(struct qt_disk_dqdbheader))
 	       / info->dqi_entry_size;
+}
+
+/*
+ * Most quota buffers are small enough to live on the stack; only fall back
+ * to kmalloc() for blocks larger than STACK_ALLOC_SIZE. Higher values were
+ * observed to cause stack corruptions.
+ */
+#define STACK_ALLOC_SIZE SZ_1K
+#define DQBUF_ONSTACK(name) char name##_onstack[STACK_ALLOC_SIZE] __aligned(8)
+
+static inline char *getdqbuf(size_t size, char *onstack)
+{
+	if (likely(size <= STACK_ALLOC_SIZE))
+		return onstack;
+	return kmalloc(size, GFP_NOFS);
+}
+
+static inline void freedqbuf(char *buf, char *onstack)
+{
+	if (unlikely(buf != onstack))
+		kfree(buf);
 }
 
 static ssize_t read_blk(struct qtree_mem_dqinfo *info, uint blk, char *buf)
@@ -114,7 +136,8 @@ static int check_dquot_block_header(struct qtree_mem_dqinfo *info,
 /* Remove empty block from list and return it */
 static int get_free_dqblk(struct qtree_mem_dqinfo *info)
 {
-	char *buf = kmalloc(info->dqi_usable_bs, GFP_NOFS);
+	DQBUF_ONSTACK(buf);
+	char *buf = getdqbuf(info->dqi_usable_bs, buf_onstack);
 	struct qt_disk_dqdbheader *dh = (struct qt_disk_dqdbheader *)buf;
 	int ret, blk;
 
@@ -141,7 +164,7 @@ static int get_free_dqblk(struct qtree_mem_dqinfo *info)
 	mark_info_dirty(info->dqi_sb, info->dqi_type);
 	ret = blk;
 out_buf:
-	kfree(buf);
+	freedqbuf(buf, buf_onstack);
 	return ret;
 }
 
@@ -166,7 +189,8 @@ static int put_free_dqblk(struct qtree_mem_dqinfo *info, char *buf, uint blk)
 static int remove_free_dqentry(struct qtree_mem_dqinfo *info, char *buf,
 			       uint blk)
 {
-	char *tmpbuf = kmalloc(info->dqi_usable_bs, GFP_NOFS);
+	DQBUF_ONSTACK(tmpbuf);
+	char *tmpbuf = getdqbuf(info->dqi_usable_bs, tmpbuf_onstack);
 	struct qt_disk_dqdbheader *dh = (struct qt_disk_dqdbheader *)buf;
 	uint nextblk = le32_to_cpu(dh->dqdh_next_free);
 	uint prevblk = le32_to_cpu(dh->dqdh_prev_free);
@@ -197,7 +221,7 @@ static int remove_free_dqentry(struct qtree_mem_dqinfo *info, char *buf,
 		info->dqi_free_entry = nextblk;
 		mark_info_dirty(info->dqi_sb, info->dqi_type);
 	}
-	kfree(tmpbuf);
+	freedqbuf(tmpbuf, tmpbuf_onstack);
 	dh->dqdh_next_free = dh->dqdh_prev_free = cpu_to_le32(0);
 	/* No matter whether write succeeds block is out of list */
 	if (write_blk(info, blk, buf) < 0)
@@ -205,7 +229,7 @@ static int remove_free_dqentry(struct qtree_mem_dqinfo *info, char *buf,
 			    "with free entries", blk);
 	return 0;
 out_buf:
-	kfree(tmpbuf);
+	freedqbuf(tmpbuf, tmpbuf_onstack);
 	return err;
 }
 
@@ -213,7 +237,8 @@ out_buf:
 static int insert_free_dqentry(struct qtree_mem_dqinfo *info, char *buf,
 			       uint blk)
 {
-	char *tmpbuf = kmalloc(info->dqi_usable_bs, GFP_NOFS);
+	DQBUF_ONSTACK(tmpbuf);
+	char *tmpbuf = getdqbuf(info->dqi_usable_bs, tmpbuf_onstack);
 	struct qt_disk_dqdbheader *dh = (struct qt_disk_dqdbheader *)buf;
 	int err;
 
@@ -234,12 +259,12 @@ static int insert_free_dqentry(struct qtree_mem_dqinfo *info, char *buf,
 		if (err < 0)
 			goto out_buf;
 	}
-	kfree(tmpbuf);
+	freedqbuf(tmpbuf, tmpbuf_onstack);
 	info->dqi_free_entry = blk;
 	mark_info_dirty(info->dqi_sb, info->dqi_type);
 	return 0;
 out_buf:
-	kfree(tmpbuf);
+	freedqbuf(tmpbuf, tmpbuf_onstack);
 	return err;
 }
 
@@ -261,7 +286,8 @@ static uint find_free_dqentry(struct qtree_mem_dqinfo *info,
 {
 	uint blk, i;
 	struct qt_disk_dqdbheader *dh;
-	char *buf = kmalloc(info->dqi_usable_bs, GFP_NOFS);
+	DQBUF_ONSTACK(buf);
+	char *buf = getdqbuf(info->dqi_usable_bs, buf_onstack);
 	char *ddquot;
 
 	*err = 0;
@@ -282,7 +308,7 @@ static uint find_free_dqentry(struct qtree_mem_dqinfo *info,
 		blk = get_free_dqblk(info);
 		if ((int)blk < 0) {
 			*err = blk;
-			kfree(buf);
+			freedqbuf(buf, buf_onstack);
 			return 0;
 		}
 		memset(buf, 0, info->dqi_usable_bs);
@@ -324,10 +350,10 @@ static uint find_free_dqentry(struct qtree_mem_dqinfo *info,
 	dquot->dq_off = ((loff_t)blk << info->dqi_blocksize_bits) +
 			sizeof(struct qt_disk_dqdbheader) +
 			i * info->dqi_entry_size;
-	kfree(buf);
+	freedqbuf(buf, buf_onstack);
 	return blk;
 out_buf:
-	kfree(buf);
+	freedqbuf(buf, buf_onstack);
 	return 0;
 }
 
@@ -335,7 +361,8 @@ out_buf:
 static int do_insert_tree(struct qtree_mem_dqinfo *info, struct dquot *dquot,
 			  uint *blks, int depth)
 {
-	char *buf = kmalloc(info->dqi_usable_bs, GFP_NOFS);
+	DQBUF_ONSTACK(buf);
+	char *buf = getdqbuf(info->dqi_usable_bs, buf_onstack);
 	int ret = 0, newson = 0, newact = 0;
 	__le32 *ref;
 	uint newblk;
@@ -409,7 +436,7 @@ static int do_insert_tree(struct qtree_mem_dqinfo *info, struct dquot *dquot,
 		put_free_dqblk(info, buf, blks[depth]);
 	}
 out_buf:
-	kfree(buf);
+	freedqbuf(buf, buf_onstack);
 	return ret;
 }
 
@@ -441,7 +468,8 @@ int qtree_write_dquot(struct qtree_mem_dqinfo *info, struct dquot *dquot)
 	int type = dquot->dq_id.type;
 	struct super_block *sb = dquot->dq_sb;
 	ssize_t ret;
-	char *ddquot = kmalloc(info->dqi_entry_size, GFP_NOFS);
+	DQBUF_ONSTACK(ddquot);
+	char *ddquot = getdqbuf(info->dqi_entry_size, ddquot_onstack);
 
 	if (!ddquot)
 		return -ENOMEM;
@@ -452,7 +480,7 @@ int qtree_write_dquot(struct qtree_mem_dqinfo *info, struct dquot *dquot)
 		if (ret < 0) {
 			quota_error(sb, "Error %zd occurred while creating "
 				    "quota", ret);
-			kfree(ddquot);
+			freedqbuf(ddquot, ddquot_onstack);
 			return ret;
 		}
 	}
@@ -469,7 +497,7 @@ int qtree_write_dquot(struct qtree_mem_dqinfo *info, struct dquot *dquot)
 		ret = 0;
 	}
 	dqstats_inc(DQST_WRITES);
-	kfree(ddquot);
+	freedqbuf(ddquot, ddquot_onstack);
 
 	return ret;
 }
@@ -480,7 +508,8 @@ static int free_dqentry(struct qtree_mem_dqinfo *info, struct dquot *dquot,
 			uint blk)
 {
 	struct qt_disk_dqdbheader *dh;
-	char *buf = kmalloc(info->dqi_usable_bs, GFP_NOFS);
+	DQBUF_ONSTACK(buf);
+	char *buf = getdqbuf(info->dqi_usable_bs, buf_onstack);
 	int ret = 0;
 
 	if (!buf)
@@ -536,7 +565,7 @@ static int free_dqentry(struct qtree_mem_dqinfo *info, struct dquot *dquot,
 	}
 	dquot->dq_off = 0;	/* Quota is now unattached */
 out_buf:
-	kfree(buf);
+	freedqbuf(buf, buf_onstack);
 	return ret;
 }
 
@@ -544,7 +573,8 @@ out_buf:
 static int remove_tree(struct qtree_mem_dqinfo *info, struct dquot *dquot,
 		       uint *blks, int depth)
 {
-	char *buf = kmalloc(info->dqi_usable_bs, GFP_NOFS);
+	DQBUF_ONSTACK(buf);
+	char *buf = getdqbuf(info->dqi_usable_bs, buf_onstack);
 	int ret = 0;
 	uint newblk;
 	__le32 *ref = (__le32 *)buf;
@@ -599,7 +629,7 @@ static int remove_tree(struct qtree_mem_dqinfo *info, struct dquot *dquot,
 		}
 	}
 out_buf:
-	kfree(buf);
+	freedqbuf(buf, buf_onstack);
 	return ret;
 }
 
@@ -622,7 +652,8 @@ EXPORT_SYMBOL(qtree_delete_dquot);
 static loff_t find_block_dqentry(struct qtree_mem_dqinfo *info,
 				 struct dquot *dquot, uint blk)
 {
-	char *buf = kmalloc(info->dqi_usable_bs, GFP_NOFS);
+	DQBUF_ONSTACK(buf);
+	char *buf = getdqbuf(info->dqi_usable_bs, buf_onstack);
 	loff_t ret = 0;
 	int i;
 	char *ddquot;
@@ -652,7 +683,7 @@ static loff_t find_block_dqentry(struct qtree_mem_dqinfo *info,
 		  qt_disk_dqdbheader) + i * info->dqi_entry_size;
 	}
 out_buf:
-	kfree(buf);
+	freedqbuf(buf, buf_onstack);
 	return ret;
 }
 
@@ -660,7 +691,8 @@ out_buf:
 static loff_t find_tree_dqentry(struct qtree_mem_dqinfo *info,
 				struct dquot *dquot, uint *blks, int depth)
 {
-	char *buf = kmalloc(info->dqi_usable_bs, GFP_NOFS);
+	DQBUF_ONSTACK(buf);
+	char *buf = getdqbuf(info->dqi_usable_bs, buf_onstack);
 	loff_t ret = 0;
 	__le32 *ref = (__le32 *)buf;
 	uint blk;
@@ -699,7 +731,7 @@ static loff_t find_tree_dqentry(struct qtree_mem_dqinfo *info,
 	else
 		ret = find_block_dqentry(info, dquot, blk);
 out_buf:
-	kfree(buf);
+	freedqbuf(buf, buf_onstack);
 	return ret;
 }
 
@@ -721,6 +753,7 @@ int qtree_read_dquot(struct qtree_mem_dqinfo *info, struct dquot *dquot)
 	int type = dquot->dq_id.type;
 	struct super_block *sb = dquot->dq_sb;
 	loff_t offset;
+	DQBUF_ONSTACK(ddquot);
 	char *ddquot;
 	int ret = 0;
 
@@ -748,7 +781,7 @@ int qtree_read_dquot(struct qtree_mem_dqinfo *info, struct dquot *dquot)
 		}
 		dquot->dq_off = offset;
 	}
-	ddquot = kmalloc(info->dqi_entry_size, GFP_NOFS);
+	ddquot = getdqbuf(info->dqi_entry_size, ddquot_onstack);
 	if (!ddquot)
 		return -ENOMEM;
 	ret = sb->s_op->quota_read(sb, type, ddquot, info->dqi_entry_size,
@@ -760,7 +793,7 @@ int qtree_read_dquot(struct qtree_mem_dqinfo *info, struct dquot *dquot)
 			    from_kqid(&init_user_ns, dquot->dq_id));
 		set_bit(DQ_FAKE_B, &dquot->dq_flags);
 		memset(&dquot->dq_dqb, 0, sizeof(struct mem_dqblk));
-		kfree(ddquot);
+		freedqbuf(ddquot, ddquot_onstack);
 		goto out;
 	}
 	spin_lock(&dquot->dq_dqb_lock);
@@ -771,7 +804,7 @@ int qtree_read_dquot(struct qtree_mem_dqinfo *info, struct dquot *dquot)
 	    !dquot->dq_dqb.dqb_isoftlimit)
 		set_bit(DQ_FAKE_B, &dquot->dq_flags);
 	spin_unlock(&dquot->dq_dqb_lock);
-	kfree(ddquot);
+	freedqbuf(ddquot, ddquot_onstack);
 out:
 	dqstats_inc(DQST_READS);
 	return ret;
@@ -792,7 +825,8 @@ EXPORT_SYMBOL(qtree_release_dquot);
 static int find_next_id(struct qtree_mem_dqinfo *info, qid_t *id,
 			unsigned int blk, int depth)
 {
-	char *buf = kmalloc(info->dqi_usable_bs, GFP_NOFS);
+	DQBUF_ONSTACK(buf);
+	char *buf = getdqbuf(info->dqi_usable_bs, buf_onstack);
 	__le32 *ref = (__le32 *)buf;
 	ssize_t ret;
 	unsigned int epb = info->dqi_usable_bs >> 2;
@@ -835,7 +869,7 @@ static int find_next_id(struct qtree_mem_dqinfo *info, qid_t *id,
 		goto out_buf;
 	}
 out_buf:
-	kfree(buf);
+	freedqbuf(buf, buf_onstack);
 	return ret;
 }
 
