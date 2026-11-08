@@ -123,6 +123,15 @@
 #include <trace/events/sock.h>
 #include <trace/hooks/net.h>
 
+int sysctl_reserved_port_bind __read_mostly = 1;
+
+#define AID_INET KGIDT_INIT(3003)
+
+static inline int current_has_network(void)
+{
+	return in_egroup_p(AID_INET) || capable(CAP_NET_RAW);
+}
+
 /* The inetsw table contains everything that inet_create needs to
  * build a new socket.
  */
@@ -262,6 +271,9 @@ static int inet_create(struct net *net, struct socket *sock, int protocol,
 
 	if (protocol < 0 || protocol >= IPPROTO_MAX)
 		return -EINVAL;
+
+	if (!current_has_network())
+		return -EACCES;
 
 	sock->state = SS_UNCONNECTED;
 
@@ -1759,14 +1771,24 @@ static const struct net_protocol igmp_protocol = {
 };
 #endif
 
-static const struct net_protocol tcp_protocol = {
+/* thinking of making this const? Don't.
+ * early_demux can change based on sysctl.
+ */
+static struct net_protocol tcp_protocol = {
+	.early_demux	=	tcp_v4_early_demux,
+	.early_demux_handler =  tcp_v4_early_demux,
 	.handler	=	tcp_v4_rcv,
 	.err_handler	=	tcp_v4_err,
 	.no_policy	=	1,
 	.icmp_strict_tag_validation = 1,
 };
 
-static const struct net_protocol udp_protocol = {
+/* thinking of making this const? Don't.
+ * early_demux can change based on sysctl.
+ */
+static struct net_protocol udp_protocol = {
+	.early_demux =	udp_v4_early_demux,
+	.early_demux_handler =	udp_v4_early_demux,
 	.handler =	udp_rcv,
 	.err_handler =	udp_err,
 	.no_policy =	1,

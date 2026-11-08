@@ -337,7 +337,7 @@ static void rxrpc_clean_up_connection(struct work_struct *work)
 	 */
 	rxrpc_purge_queue(&conn->rx_queue);
 
-	call_rcu(&conn->rcu, rxrpc_rcu_free_connection);
+	call_rcu_hurry(&conn->rcu, rxrpc_rcu_free_connection);
 }
 
 /*
