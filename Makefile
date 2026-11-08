@@ -2232,3 +2232,5 @@ $(warning CONFIG_LLVM_POLLY: $(CC) cannot load LLVM Polly, building without it)
 endif
 endif
 endif
+KBUILD_CFLAGS += -Wuninitialized
+KBUILD_CFLAGS += -Wno-sometimes-uninitialized
