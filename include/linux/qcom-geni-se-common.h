@@ -36,14 +36,12 @@ if (print) { \
 } \
 } while (0)
 
+/* Debug prints compiled out; the arguments are still referenced to avoid unused warnings */
 #define GENI_SE_DBG(log_ctx, print, dev, x...) do { \
-ipc_log_string(log_ctx, x); \
-if (print) { \
-	if (dev) \
-		dev_dbg((dev), x); \
-	else \
-		pr_debug(x); \
-} \
+	(void)(log_ctx); \
+	(void)(print); \
+	(void)(dev); \
+	no_printk(x); \
 } while (0)
 
 #define DEFAULT_BUS_WIDTH	(4)
