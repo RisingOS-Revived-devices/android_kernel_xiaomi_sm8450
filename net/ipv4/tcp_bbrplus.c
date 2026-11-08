@@ -42,7 +42,7 @@ struct bbr {
 	u32	rtt_cnt;
 	u32	next_rtt_delivered;
 	u64	cycle_mstamp;
-	
+
 	u32	mode:3,
 		prev_ca_state:3,
 		packet_conservation:1,
