@@ -27,6 +27,15 @@ struct kernfs_open_node {
 	unsigned int		nr_to_release;
 };
 
+static struct kmem_cache *kmem_open_node_pool;
+static struct kmem_cache *kmem_open_file_pool;
+
+void __init init_kernfs_file_pool(void)
+{
+	kmem_open_node_pool = KMEM_CACHE(kernfs_open_node, SLAB_HWCACHE_ALIGN | SLAB_PANIC);
+	kmem_open_file_pool = KMEM_CACHE(kernfs_open_file, SLAB_HWCACHE_ALIGN | SLAB_PANIC);
+}
+
 /*
  * kernfs_notify() may be called from any context and bounces notifications
  * through a work item.  To minimize space overhead in kernfs_node, the
@@ -594,7 +603,7 @@ static int kernfs_get_open_node(struct kernfs_node *kn,
 
 	if (!on) {
 		/* not there, initialize a new one */
-		on = kzalloc(sizeof(*on), GFP_KERNEL);
+		on = kmem_cache_zalloc(kmem_open_node_pool, GFP_KERNEL);
 		if (!on) {
 			mutex_unlock(mutex);
 			return -ENOMEM;
@@ -692,7 +701,7 @@ static int kernfs_fop_open(struct inode *inode, struct file *file)
 
 	/* allocate a kernfs_open_file for the file */
 	error = -ENOMEM;
-	of = kzalloc(sizeof(struct kernfs_open_file), GFP_KERNEL);
+	of = kmem_cache_zalloc(kmem_open_file_pool, GFP_KERNEL);
 	if (!of)
 		goto err_out;
 
@@ -783,7 +792,7 @@ err_seq_release:
 	seq_release(inode, file);
 err_free:
 	kfree(of->prealloc_buf);
-	kfree(of);
+	kmem_cache_free(kmem_open_file_pool, of);
 err_out:
 	kernfs_put_active(kn);
 	return error;
@@ -830,7 +839,7 @@ static int kernfs_fop_release(struct inode *inode, struct file *filp)
 	kernfs_unlink_open_file(kn, of, false);
 	seq_release(inode, filp);
 	kfree(of->prealloc_buf);
-	kfree(of);
+	kmem_cache_free(kmem_open_file_pool, of);
 
 	return 0;
 }

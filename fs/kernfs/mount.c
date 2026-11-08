@@ -421,6 +421,8 @@ static void __init kernfs_lock_init(void)
 
 void __init kernfs_init(void)
 {
+	init_kernfs_file_pool();
+
 	kernfs_node_cache = kmem_cache_create("kernfs_node_cache",
 					      sizeof(struct kernfs_node),
 					      0, SLAB_PANIC, NULL);
