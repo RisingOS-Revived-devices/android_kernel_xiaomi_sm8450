@@ -157,7 +157,7 @@ static void bbr_drain_to_target_cycling(struct sock *sk,
 
 	if (elapsed_us > bbr->cycle_len * bbr->min_rtt_us) {
 		bbr->cycle_mstamp = tp->delivered_mstamp;
-		bbr->cycle_len = CYCLE_LEN - prandom_u32_max(bbr_cycle_rand);
+		bbr->cycle_len = CYCLE_LEN - get_random_u32_below(bbr_cycle_rand);
 		bbr_set_cycle_idx(sk, BBR_BW_PROBE_UP);
 		return;
 	}
@@ -241,9 +241,9 @@ static void bbr_init_pacing_rate_from_rtt(struct sock *sk)
 	} else {
 		rtt_us = USEC_PER_MSEC;
 	}
-	bw = (u64)tp->snd_cwnd * BW_UNIT;
+	bw = (u64)tcp_snd_cwnd(tp) * BW_UNIT;
 	do_div(bw, rtt_us);
-	sk->sk_pacing_rate = bbr_bw_to_pacing_rate(sk, bw, bbr_high_gain);
+	WRITE_ONCE(sk->sk_pacing_rate, bbr_bw_to_pacing_rate(sk, bw, bbr_high_gain));
 }
 
 static void bbr_set_pacing_rate(struct sock *sk, u32 bw, int gain)
@@ -254,8 +254,8 @@ static void bbr_set_pacing_rate(struct sock *sk, u32 bw, int gain)
 
 	if (unlikely(!bbr->has_seen_rtt && tp->srtt_us))
 		bbr_init_pacing_rate_from_rtt(sk);
-	if (bbr_full_bw_reached(sk) || rate > sk->sk_pacing_rate)
-		sk->sk_pacing_rate = rate;
+	if (bbr_full_bw_reached(sk) || rate > READ_ONCE(sk->sk_pacing_rate))
+		WRITE_ONCE(sk->sk_pacing_rate, rate);
 }
 
 static u32 bbr_tso_segs_goal(struct sock *sk)
@@ -263,10 +263,10 @@ static u32 bbr_tso_segs_goal(struct sock *sk)
 	struct tcp_sock *tp = tcp_sk(sk);
 	u32 min_segs, bytes, segs;
 
-	min_segs = sk->sk_pacing_rate < (bbr_min_tso_rate >> 3) ? 1 : 2;
+	min_segs = READ_ONCE(sk->sk_pacing_rate) < (bbr_min_tso_rate >> 3) ? 1 : 2;
 
 	bytes = min_t(unsigned long,
-		      sk->sk_pacing_rate >> READ_ONCE(sk->sk_pacing_shift),
+		      READ_ONCE(sk->sk_pacing_rate) >> READ_ONCE(sk->sk_pacing_shift),
 		      sk->sk_gso_max_size - 1 - MAX_TCP_HEADER);
 	segs = max_t(u32, bytes / tp->mss_cache, min_segs);
 	return min_t(u32, segs, 0x7FU);
@@ -274,16 +274,16 @@ static u32 bbr_tso_segs_goal(struct sock *sk)
 
 static u32 bbr_min_tso_segs(struct sock *sk)
 {
-	return sk->sk_pacing_rate < (bbr_min_tso_rate >> 3) ? 1 : 2;
+	return READ_ONCE(sk->sk_pacing_rate) < (bbr_min_tso_rate >> 3) ? 1 : 2;
 }
 
-/* This kernel has the older tso_segs hook, so autosize with our minimum. */
+/* Autosize through the tso_segs hook with the BBRplus minimum. */
 static u32 bbr_tso_segs(struct sock *sk, unsigned int mss_now)
 {
 	u32 bytes;
 
 	bytes = min_t(unsigned long,
-		      sk->sk_pacing_rate >> READ_ONCE(sk->sk_pacing_shift),
+		      READ_ONCE(sk->sk_pacing_rate) >> READ_ONCE(sk->sk_pacing_shift),
 		      sk->sk_gso_max_size - 1 - MAX_TCP_HEADER);
 	return max_t(u32, bytes / mss_now, bbr_min_tso_segs(sk));
 }
@@ -294,9 +294,9 @@ static void bbr_save_cwnd(struct sock *sk)
 	struct bbr *bbr = inet_csk_ca(sk);
 
 	if (bbr->prev_ca_state < TCP_CA_Recovery && bbr->mode != BBR_PROBE_RTT)
-		bbr->prior_cwnd = tp->snd_cwnd;
+		bbr->prior_cwnd = tcp_snd_cwnd(tp);
 	else
-		bbr->prior_cwnd = max(bbr->prior_cwnd, tp->snd_cwnd);
+		bbr->prior_cwnd = max(bbr->prior_cwnd, tcp_snd_cwnd(tp));
 }
 
 static void bbr_cwnd_event(struct sock *sk, enum tcp_ca_event event)
@@ -364,7 +364,7 @@ static bool bbr_set_cwnd_to_recover_or_restore(
 	struct bbr *bbr = inet_csk_ca(sk);
 	u8 prev_state = bbr->prev_ca_state;
 	u8 state = inet_csk(sk)->icsk_ca_state;
-	u32 cwnd = tp->snd_cwnd;
+	u32 cwnd = tcp_snd_cwnd(tp);
 
 	if (rs->losses > 0)
 		cwnd = max_t(s32, cwnd - rs->losses, 1);
@@ -414,7 +414,7 @@ static void bbr_set_cwnd(struct sock *sk, const struct rate_sample *rs,
 	if (!acked)
 		return;
 
-	cwnd = tp->snd_cwnd;
+	cwnd = tcp_snd_cwnd(tp);
 	if (bbr_set_cwnd_to_recover_or_restore(sk, rs, acked, &cwnd))
 		goto done;
 
@@ -429,9 +429,9 @@ static void bbr_set_cwnd(struct sock *sk, const struct rate_sample *rs,
 	cwnd = max(cwnd, bbr_cwnd_min_target);
 
 done:
-	tp->snd_cwnd = min(cwnd, tp->snd_cwnd_clamp);
+	tcp_snd_cwnd_set(tp, min(cwnd, tp->snd_cwnd_clamp));
 	if (bbr->mode == BBR_PROBE_RTT)
-		tp->snd_cwnd = min(tp->snd_cwnd, bbr_probe_rtt_cwnd(sk));
+		tcp_snd_cwnd_set(tp, min(tcp_snd_cwnd(tp), bbr_probe_rtt_cwnd(sk)));
 }
 
 static void bbr_update_cycle_phase(struct sock *sk,
@@ -458,7 +458,7 @@ static void bbr_reset_probe_bw_mode(struct sock *sk)
 
 	bbr->mode = BBR_PROBE_BW;
 	bbr->cwnd_gain = bbr_cwnd_gain;
-	bbr->cycle_len = CYCLE_LEN - prandom_u32_max(bbr_cycle_rand);
+	bbr->cycle_len = CYCLE_LEN - get_random_u32_below(bbr_cycle_rand);
 	bbr->cycle_mstamp = tcp_sk(sk)->delivered_mstamp;
 	bbr_set_cycle_idx(sk, BBR_BW_PROBE_CRUISE);
 }
@@ -665,7 +665,7 @@ static void bbr_update_ack_aggregation(struct sock *sk,
 				     bbr->ack_epoch_acked + rs->acked_sacked,
 				     bbr_ack_epoch_acked_reset_thresh - 1);
 	extra_acked = bbr->ack_epoch_acked - expected_acked;
-	extra_acked = min(extra_acked, tp->snd_cwnd);
+	extra_acked = min(extra_acked, tcp_snd_cwnd(tp));
 	if (extra_acked > bbr->extra_acked[bbr->extra_acked_win_idx])
 		bbr->extra_acked[bbr->extra_acked_win_idx] = extra_acked;
 }
@@ -789,7 +789,7 @@ static u32 bbr_undo_cwnd(struct sock *sk)
 	bbr->full_bw = 0;
 	bbr->full_bw_cnt = 0;
 	bbr_reset_lt_bw_sampling(sk);
-	return tcp_sk(sk)->snd_cwnd;
+	return tcp_snd_cwnd(tcp_sk(sk));
 }
 
 static u32 bbr_ssthresh(struct sock *sk)
