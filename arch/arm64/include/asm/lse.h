@@ -16,10 +16,8 @@
 #include <asm/atomic_lse.h>
 #include <asm/cpucaps.h>
 
-static __always_inline bool system_uses_lse_atomics(void)
-{
-	return alternative_has_cap_likely(ARM64_HAS_LSE_ATOMICS);
-}
+/* Always use LSE atomics */
+#define system_uses_lse_atomics() true
 
 #define __lse_ll_sc_body(op, ...)					\
 ({									\
