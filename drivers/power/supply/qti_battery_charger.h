@@ -622,6 +622,10 @@ struct battery_chg_dev {
 	u32				thermal_fcc_ua;
 	u32				restrict_fcc_ua;
 	u32				last_fcc_ua;
+	/* constant_charge_current request (UINT_MAX: none) and its ceiling (0: none) */
+	struct mutex			fcc_lock;
+	u32				fcc_req_ua;
+	u32				fcc_max_ua;
 	u32				usb_icl_ua;
 	u32				reverse_chg_flag;
 	u32				boost_mode;

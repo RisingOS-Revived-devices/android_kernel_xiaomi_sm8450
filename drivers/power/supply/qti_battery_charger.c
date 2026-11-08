@@ -1420,6 +1420,12 @@ static int battery_psy_get_prop(struct power_supply *psy,
 	if (prop == POWER_SUPPLY_PROP_TIME_TO_FULL_NOW)
 		prop = POWER_SUPPLY_PROP_TIME_TO_FULL_AVG;
 
+	/* Kept in the kernel, the ADSP has no such property */
+	if (prop == POWER_SUPPLY_PROP_CONSTANT_CHARGE_CURRENT_MAX) {
+		pval->intval = bcdev->fcc_max_ua;
+		return 0;
+	}
+
 	prop_id = get_property_id(pst, prop);
 	if (prop_id < 0)
 		return prop_id;
@@ -1470,21 +1476,43 @@ static int battery_psy_get_prop(struct power_supply *psy,
 	return rc;
 }
 
-static int battery_psy_set_fcc(struct battery_chg_dev *bcdev, u32 prop_id, int val)
+/* Called with fcc_lock held */
+static int battery_psy_apply_fcc(struct battery_chg_dev *bcdev)
 {
-	struct psy_state *pst = &bcdev->psy_list[PSY_TYPE_BATTERY];
-	u32 temp;
+	u32 fcc_ua = bcdev->fcc_req_ua;
 	int rc;
 
-	pr_info("Kernel Set FCC to %u\n", val);
+	if (bcdev->fcc_max_ua)
+		fcc_ua = min(fcc_ua, bcdev->fcc_max_ua);
 
-	temp = val;
-	if (val < 0)
-		temp = UINT_MAX;
-
-	rc = write_property_id(bcdev, pst, prop_id, temp);
+	rc = write_property_id(bcdev, &bcdev->psy_list[PSY_TYPE_BATTERY],
+				BATT_CONSTANT_CURRENT, fcc_ua);
 	if (!rc)
-		pr_debug("Set FCC to %u\n", temp);
+		pr_debug("Set FCC to %u\n", fcc_ua);
+
+	return rc;
+}
+
+static int battery_psy_set_fcc(struct battery_chg_dev *bcdev, int val)
+{
+	int rc;
+
+	mutex_lock(&bcdev->fcc_lock);
+	bcdev->fcc_req_ua = val < 0 ? UINT_MAX : val;
+	rc = battery_psy_apply_fcc(bcdev);
+	mutex_unlock(&bcdev->fcc_lock);
+
+	return rc;
+}
+
+static int battery_psy_set_fcc_max(struct battery_chg_dev *bcdev, int val)
+{
+	int rc;
+
+	mutex_lock(&bcdev->fcc_lock);
+	bcdev->fcc_max_ua = val > 0 ? val : 0;
+	rc = battery_psy_apply_fcc(bcdev);
+	mutex_unlock(&bcdev->fcc_lock);
 
 	return rc;
 }
@@ -1495,12 +1523,15 @@ static int battery_psy_set_prop(struct power_supply *psy,
 {
 	struct battery_chg_dev *bcdev = power_supply_get_drvdata(psy);
         struct psy_state *pst =&bcdev->psy_list[PSY_TYPE_BATTERY];
-        int prop_id, rc = 0;
+        int prop_id;
+
+	if (prop == POWER_SUPPLY_PROP_CONSTANT_CHARGE_CURRENT_MAX)
+		return battery_psy_set_fcc_max(bcdev, pval->intval);
 
         prop_id = get_property_id(pst, prop);
         if (prop_id < 0)
             return prop_id;
-  
+
 	switch (prop) {
 	case POWER_SUPPLY_PROP_CHARGE_CONTROL_START_THRESHOLD:
 		return battery_psy_set_charge_start_threshold(bcdev,
@@ -1509,13 +1540,10 @@ static int battery_psy_set_prop(struct power_supply *psy,
 		return battery_psy_set_charge_end_threshold(bcdev,
 								pval->intval);
 	case POWER_SUPPLY_PROP_CONSTANT_CHARGE_CURRENT:
-		rc = battery_psy_set_fcc(bcdev, prop_id, pval->intval);
-		break;
+		return battery_psy_set_fcc(bcdev, pval->intval);
 	default:
 		return -EINVAL;
 	}
-
-	return 0;
 }
 
 static int battery_psy_prop_is_writeable(struct power_supply *psy,
@@ -1525,6 +1553,7 @@ static int battery_psy_prop_is_writeable(struct power_supply *psy,
 	case POWER_SUPPLY_PROP_CHARGE_CONTROL_START_THRESHOLD:
 	case POWER_SUPPLY_PROP_CHARGE_CONTROL_END_THRESHOLD:
 	case POWER_SUPPLY_PROP_CONSTANT_CHARGE_CURRENT:
+	case POWER_SUPPLY_PROP_CONSTANT_CHARGE_CURRENT_MAX:
 		return 1;
 	default:
 		break;
@@ -1549,6 +1578,7 @@ static enum power_supply_property battery_props[] = {
 	POWER_SUPPLY_PROP_CHARGE_CONTROL_START_THRESHOLD,
 	POWER_SUPPLY_PROP_CHARGE_CONTROL_END_THRESHOLD,
 	POWER_SUPPLY_PROP_CONSTANT_CHARGE_CURRENT,
+	POWER_SUPPLY_PROP_CONSTANT_CHARGE_CURRENT_MAX,
 	POWER_SUPPLY_PROP_TEMP,
 	POWER_SUPPLY_PROP_TECHNOLOGY,
 	POWER_SUPPLY_PROP_CHARGE_COUNTER,
@@ -1589,6 +1619,7 @@ static enum power_supply_property battery_props_waipio[] = {
 	POWER_SUPPLY_PROP_CHARGE_CONTROL_LIMIT,
 	POWER_SUPPLY_PROP_CHARGE_CONTROL_LIMIT_MAX,
 	POWER_SUPPLY_PROP_CONSTANT_CHARGE_CURRENT,
+	POWER_SUPPLY_PROP_CONSTANT_CHARGE_CURRENT_MAX,
 	POWER_SUPPLY_PROP_TEMP,
 	POWER_SUPPLY_PROP_TECHNOLOGY,
 	POWER_SUPPLY_PROP_CHARGE_COUNTER,
@@ -1738,6 +1769,14 @@ static void battery_chg_subsys_up_work(struct work_struct *work)
 			pr_err("Failed to set FCC (%u uA), rc=%d\n",
 				bcdev->last_fcc_ua, rc);
 	}
+
+	mutex_lock(&bcdev->fcc_lock);
+	if (bcdev->fcc_req_ua != UINT_MAX || bcdev->fcc_max_ua) {
+		rc = battery_psy_apply_fcc(bcdev);
+		if (rc < 0)
+			pr_err("Failed to restore FCC, rc=%d\n", rc);
+	}
+	mutex_unlock(&bcdev->fcc_lock);
 
 	if (bcdev->usb_icl_ua) {
 		rc = usb_psy_set_icl(bcdev, USB_INPUT_CURR_LIMIT,
@@ -3098,6 +3137,8 @@ static int battery_chg_probe(struct platform_device *pdev)
 		devm_kzalloc(&pdev->dev, MAX_STR_LEN, GFP_KERNEL);
 
 	mutex_init(&bcdev->rw_lock);
+	mutex_init(&bcdev->fcc_lock);
+	bcdev->fcc_req_ua = UINT_MAX;
 	init_rwsem(&bcdev->state_sem);
 	init_completion(&bcdev->ack);
 	init_completion(&bcdev->fw_buf_ack);
