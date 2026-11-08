@@ -2194,3 +2194,41 @@ FORCE:
 
 KBUILD_CFLAGS += -march=armv9-a+crypto+nosve+dotprod -mcpu=cortex-a510 -mtune=cortex-a510
 KBUILD_AFLAGS += -march=armv9-a+crypto+nosve+dotprod -mcpu=cortex-a510 -mtune=cortex-a510
+
+ifdef CONFIG_LLVM_POLLY
+# Android's prebuilt clang ships Polly only as a plugin (lib/LLVMPolly.so)
+# instead of linking it in; load the plugin when it is there.
+POLLY_PLUGIN	:= $(wildcard $(dir $(shell $(CC) -print-resource-dir 2>/dev/null))../LLVMPolly.so)
+ifneq ($(POLLY_PLUGIN),)
+POLLY_LOAD	:= -fplugin=$(POLLY_PLUGIN) -fpass-plugin=$(POLLY_PLUGIN)
+endif
+
+POLLY_CFLAGS	:= -fvectorize -funroll-loops -mllvm -polly \
+		-mllvm -polly-run-inliner \
+		-mllvm -polly-ast-use-context \
+		-mllvm -polly-detect-keep-going \
+		-mllvm -polly-invariant-load-hoisting \
+		-mllvm -polly-vectorizer=stripmine
+
+ifeq ($(shell test $(CONFIG_CLANG_VERSION) -gt 130000; echo $$?),0)
+POLLY_CFLAGS	+= -mllvm -polly-loopfusion-greedy=1 \
+		-mllvm -polly-reschedule=1 \
+		-mllvm -polly-postopts=1 \
+		-mllvm -polly-num-threads=0 \
+		-mllvm -polly-omp-backend=LLVM \
+		-mllvm -polly-scheduling=dynamic \
+		-mllvm -polly-scheduling-chunksize=1
+else
+POLLY_CFLAGS	+= -mllvm -polly-opt-fusion=max
+endif
+
+ifdef need-compiler
+# Only pass the flags when the compiler accepts them, so a clang without
+# Polly does not break the build.
+ifneq ($(call cc-option,$(POLLY_LOAD) -mllvm -polly),)
+KBUILD_CFLAGS	+= $(POLLY_LOAD) $(POLLY_CFLAGS)
+else
+$(warning CONFIG_LLVM_POLLY: $(CC) cannot load LLVM Polly, building without it)
+endif
+endif
+endif
