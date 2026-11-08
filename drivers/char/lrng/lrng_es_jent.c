@@ -164,7 +164,7 @@ static void lrng_jent_async_monitor_schedule(void)
 		schedule_work(&lrng_jent_async_work);
 }
 
-static void lrng_jent_async_fini(void)
+static void __maybe_unused lrng_jent_async_fini(void)
 {
 	/* Reset state */
 	memzero_explicit(lrng_jent_async, sizeof(lrng_jent_async));
