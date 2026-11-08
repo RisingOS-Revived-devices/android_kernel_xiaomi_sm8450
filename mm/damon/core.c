@@ -13,6 +13,7 @@
 #include <linux/mm.h>
 #include <linux/slab.h>
 #include <linux/string.h>
+#include <linux/module.h>
 
 #define CREATE_TRACE_POINTS
 #include <trace/events/damon.h>
@@ -21,6 +22,14 @@
 #undef DAMON_MIN_REGION
 #define DAMON_MIN_REGION 1
 #endif
+
+#ifdef MODULE_PARAM_PREFIX
+#undef MODULE_PARAM_PREFIX
+#endif
+#define MODULE_PARAM_PREFIX "damon."
+
+static uint __read_mostly debug = 0;
+module_param(debug, uint, 0644);
 
 static DEFINE_MUTEX(damon_lock);
 static int nr_running_ctxs;
@@ -562,7 +571,11 @@ static void damon_update_monitoring_results(struct damon_ctx *ctx,
  * @ctx:		monitoring context
  * @attrs:		monitoring attributes
  *
- * This function should not be called while the kdamond is running.
+ * This function should be called while the kdamond is not running, or an
+ * access check results aggregation is not ongoing (e.g., from
+ * &struct damon_callback->after_aggregation or
+ * &struct damon_callback->after_wmarks_check callbacks).
+ *
  * Every time interval is in micro-seconds.
  *
  * Return: 0 on success, negative error code otherwise.
@@ -809,7 +822,7 @@ static void kdamond_reset_aggregated(struct damon_ctx *c)
 		struct damon_region *r;
 
 		damon_for_each_region(r, t) {
-			trace_damon_aggregated(t, ti, r, damon_nr_regions(t));
+			trace_damon_aggregated(ti, r, damon_nr_regions(t));
 			r->last_nr_accesses = r->nr_accesses;
 			r->nr_accesses = 0;
 		}
@@ -914,6 +927,14 @@ static void damos_update_stat(struct damos *s,
 	if (sz_applied)
 		s->stat.nr_applied++;
 	s->stat.sz_applied += sz_applied;
+	if (debug && s->action == DAMOS_PAGEOUT && sz_applied) {
+		if (sz_applied < 1024)
+			pr_info("%lu bytes of memory reclaimed\n", sz_applied);
+		else if (sz_applied < 1024 * 1024)
+			pr_info("%lu KB of memory reclaimed\n", sz_applied >> 10);
+		else
+			pr_info("%lu MB of memory reclaimed\n", sz_applied >> 20);
+	}
 }
 
 static bool __damos_filter_out(struct damon_ctx *ctx, struct damon_target *t,
@@ -1087,8 +1108,8 @@ static void damos_set_effective_quota(struct damos_quota *quota)
 	}
 
 	if (quota->total_charged_ns)
-		throughput = quota->total_charged_sz * 1000000 /
-			quota->total_charged_ns;
+		throughput = mult_frac(quota->total_charged_sz, 1000000,
+						quota->total_charged_ns);
 	else
 		throughput = PAGE_SIZE * 1024;
 	esz = throughput * quota->ms;
@@ -1382,14 +1403,14 @@ static bool kdamond_need_stop(struct damon_ctx *ctx)
 	return true;
 }
 
-static unsigned long damos_wmark_metric_value(enum damos_wmark_metric metric)
+static int damos_get_wmark_metric_value(enum damos_wmark_metric metric,
+					unsigned long *metric_value)
 {
-	struct sysinfo i;
-
 	switch (metric) {
 	case DAMOS_WMARK_FREE_MEM_RATE:
-		si_meminfo(&i);
-		return i.freeram * 1000 / i.totalram;
+		*metric_value = global_zone_page_state(NR_FREE_PAGES) * 1000 /
+		       totalram_pages();
+		return 0;
 	default:
 		break;
 	}
@@ -1404,17 +1425,18 @@ static unsigned long damos_wmark_wait_us(struct damos *scheme)
 {
 	unsigned long metric;
 
-	if (scheme->wmarks.metric == DAMOS_WMARK_NONE)
+	if (damos_get_wmark_metric_value(scheme->wmarks.metric, &metric))
 		return 0;
 
-	metric = damos_wmark_metric_value(scheme->wmarks.metric);
 	/* higher than high watermark or lower than low watermark */
 	if (metric > scheme->wmarks.high || scheme->wmarks.low > metric) {
-		if (scheme->wmarks.activated)
-			pr_debug("deactivate a scheme (%d) for %s wmark\n",
+		if (scheme->wmarks.activated && debug)
+			pr_info("deactivate a scheme (%d) for %s wmark, "
+				"mem free rate: %ld%%\n",
 					scheme->action,
 					metric > scheme->wmarks.high ?
-					"high" : "low");
+					"high" : "low",
+					metric / 10);
 		scheme->wmarks.activated = false;
 		return scheme->wmarks.interval;
 	}
@@ -1424,8 +1446,9 @@ static unsigned long damos_wmark_wait_us(struct damos *scheme)
 			!scheme->wmarks.activated)
 		return scheme->wmarks.interval;
 
-	if (!scheme->wmarks.activated)
-		pr_debug("activate a scheme (%d)\n", scheme->action);
+	if (!scheme->wmarks.activated && debug)
+		pr_info("activate a scheme (%d), mem free rate: %ld%%\n",
+			scheme->action, metric / 10);
 	scheme->wmarks.activated = true;
 	return 0;
 }

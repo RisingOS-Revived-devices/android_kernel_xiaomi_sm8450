@@ -27,7 +27,7 @@
  * condition.  Refer to below descriptions for the watermarks parameter for
  * this.
  */
-static bool enabled __read_mostly;
+static bool enabled __read_mostly = true;
 
 /*
  * Make DAMON_RECLAIM reads the input parameters again, except ``enabled``.
@@ -45,14 +45,14 @@ module_param(commit_inputs, bool, 0600);
  * Time threshold for cold memory regions identification in microseconds.
  *
  * If a memory region is not accessed for this or longer time, DAMON_RECLAIM
- * identifies the region as cold, and reclaims.  120 seconds by default.
+ * identifies the region as cold, and reclaims.  60 seconds by default.
  */
-static unsigned long min_age __read_mostly = 120000000;
+static unsigned long min_age __read_mostly = 60000000;
 module_param(min_age, ulong, 0600);
 
 static struct damos_quota damon_reclaim_quota = {
-	/* use up to 10 ms time, reclaim up to 128 MiB per 1 sec by default */
-	.ms = 10,
+	/* use up to 50 ms time, reclaim up to 128 MiB per 1 sec by default */
+	.ms = 50,
 	.sz = 128 * 1024 * 1024,
 	.reset_interval = 1000,
 	/* Within the quota, page out older regions first. */
@@ -64,15 +64,15 @@ DEFINE_DAMON_MODULES_DAMOS_QUOTAS(damon_reclaim_quota);
 
 static struct damos_watermarks damon_reclaim_wmarks = {
 	.metric = DAMOS_WMARK_FREE_MEM_RATE,
-	.interval = 5000000,	/* 5 seconds */
-	.high = 500,		/* 50 percent */
-	.mid = 400,		/* 40 percent */
-	.low = 200,		/* 20 percent */
+	.interval = 5000000,	/*  5 seconds */
+	.high = 250,		/* 25 percent */
+	.mid = 150,		/* 15 percent */
+	.low = 50,		/*  5 percent */
 };
 DEFINE_DAMON_MODULES_WMARKS_PARAMS(damon_reclaim_wmarks);
 
 static struct damon_attrs damon_reclaim_mon_attrs = {
-	.sample_interval = 5000,	/* 5 ms */
+	.sample_interval = 10000,	/* 10 ms */
 	.aggr_interval = 100000,	/* 100 ms */
 	.ops_update_interval = 0,
 	.min_nr_regions = 10,
