@@ -1,0 +1,85 @@
+/* SPDX-License-Identifier: GPL-2.0 */
+#ifndef SSG_CGROUP_H
+#define SSG_CGROUP_H
+#include <linux/blk-cgroup.h>
+#include <linux/kthread.h>
+
+#include "blk-cgroup.h"
+
+#ifdef CONFIG_BLK_CGROUP
+/* blkcg of the kthread or current task, like the private blkcg_css() */
+static inline struct blkcg *ssg_current_blkcg(void)
+{
+	struct cgroup_subsys_state *css = kthread_blkcg();
+
+	if (!css)
+		css = task_css(current, io_cgrp_id);
+	return css_to_blkcg(css);
+}
+#else
+static inline struct blkcg *ssg_current_blkcg(void)
+{
+	return NULL;
+}
+#endif
+
+#if IS_ENABLED(CONFIG_MQ_IOSCHED_SSG_CGROUP)
+struct ssg_blkcg {
+	struct blkcg_policy_data cpd; /* must be the first member */
+
+	int max_available_ratio;
+};
+
+struct ssg_blkg {
+	struct blkg_policy_data pd; /* must be the first member */
+
+	atomic_t current_rqs;
+	int max_available_rqs;
+	unsigned int shallow_depth; /* shallow depth for each tag map to get sched tag */
+};
+
+extern int ssg_blkcg_init(void);
+extern void ssg_blkcg_exit(void);
+extern int ssg_blkcg_activate(struct request_queue *q);
+extern void ssg_blkcg_deactivate(struct request_queue *q);
+extern unsigned int ssg_blkcg_shallow_depth(struct request_queue *q);
+extern void ssg_blkcg_depth_updated(struct blk_mq_hw_ctx *hctx);
+extern void ssg_blkcg_inc_rq(struct blkcg_gq *blkg);
+extern void ssg_blkcg_dec_rq(struct blkcg_gq *blkg);
+#else
+static inline int ssg_blkcg_init(void)
+{
+	return 0;
+}
+static inline void ssg_blkcg_exit(void)
+{
+}
+
+static inline int ssg_blkcg_activate(struct request_queue *q)
+{
+	return 0;
+}
+
+static inline void ssg_blkcg_deactivate(struct request_queue *q)
+{
+}
+
+static inline unsigned int ssg_blkcg_shallow_depth(struct request_queue *q)
+{
+	return 0;
+}
+
+static inline void ssg_blkcg_depth_updated(struct blk_mq_hw_ctx *hctx)
+{
+}
+
+static inline void ssg_blkcg_inc_rq(struct blkcg_gq *blkg)
+{
+}
+
+static inline void ssg_blkcg_dec_rq(struct blkcg_gq *blkg)
+{
+}
+#endif
+
+#endif
