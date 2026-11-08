@@ -23,7 +23,7 @@
 
 
 /* =====   ZSTDLIB_API : control library symbols visibility   ===== */
-#define ZSTDLIB_VISIBLE 
+#define ZSTDLIB_VISIBLE
 
 #ifndef ZSTDLIB_HIDDEN
 #  if (__GNUC__ >= 4) && !defined(__MINGW32__)

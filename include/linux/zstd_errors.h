@@ -14,7 +14,7 @@
 
 
 /* =====   ZSTDERRORLIB_API : control library symbols visibility   ===== */
-#define ZSTDERRORLIB_VISIBLE 
+#define ZSTDERRORLIB_VISIBLE
 
 #ifndef ZSTDERRORLIB_HIDDEN
 #  if (__GNUC__ >= 4) && !defined(__MINGW32__)
