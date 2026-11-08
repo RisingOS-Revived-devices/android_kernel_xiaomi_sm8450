@@ -111,6 +111,12 @@ EXPORT_SYMBOL_GPL(sysctl_sched_base_slice);
 static unsigned int normalized_sysctl_sched_base_slice	= 2000000ULL;
 
 /*
+ * Minimum virtual deadline advantage a wakee needs to preempt the current
+ * task (see check_preempt_wakeup()); 2 ms as on the 5.10 EEVDF backport.
+ */
+static unsigned int sched_wakeup_granularity __read_mostly = 2000000U;
+
+/*
  * After fork, child runs first. If set to 0 (default) then
  * parent will (try to) run first.
  */
@@ -9181,8 +9187,18 @@ static void check_preempt_wakeup(struct rq *rq, struct task_struct *p, int wake_
 
 	/*
 	 * XXX pick_eevdf(cfs_rq) != se ?
+	 *
+	 * The wakee preempts only when its deadline advantage over the current
+	 * entity also exceeds one wakeup granularity (virtual, of the wakee).
+	 * Without the guard two interacting tasks with near-equal vruntimes
+	 * preempt each other on every wakeup -- a ping-pong that keeps light
+	 * pairs (binder, RenderThread) from settling and raises screen-off
+	 * power. Later upstream EEVDF gets the same from protect_slice /
+	 * DELAY_DEQUEUE, which 6.6 does not have.
 	 */
-	if (pick_eevdf(cfs_rq) == pse)
+	if (pick_eevdf(cfs_rq) == pse &&
+	    (s64)(se->deadline - pse->deadline) >
+	    (s64)calc_delta_fair(sched_wakeup_granularity, pse))
 		goto preempt;
 
 	return;
