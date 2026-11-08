@@ -53,6 +53,17 @@ config DRM_DEBUG_MM
 
 	  If in doubt, say "N".
 
+config DRM_DEBUG_PRINT
+	bool "Enable DRM debug prints"
+	depends on DRM
+	default n
+	help
+	  Compile in the drm_dbg*()/DRM_DEBUG*()/drm_dev_dbg() debug prints and
+	  the drm_debug_printer() output. When disabled they are stubbed out,
+	  which saves the runtime cost of __drm_dbg() in the display server.
+
+	  If in doubt, say "N".
+
 config DRM_USE_DYNAMIC_DEBUG
 	bool "use dynamic debug to implement drm.debug"
 	default n

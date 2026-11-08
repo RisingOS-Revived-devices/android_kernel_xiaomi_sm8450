@@ -187,8 +187,10 @@ EXPORT_SYMBOL(__drm_printfn_info);
 
 void __drm_printfn_debug(struct drm_printer *p, struct va_format *vaf)
 {
+#ifdef CONFIG_DRM_DEBUG_PRINT
 	/* pr_debug callsite decorations are unhelpful here */
 	printk(KERN_DEBUG "%s %pV", p->prefix, vaf);
+#endif
 }
 EXPORT_SYMBOL(__drm_printfn_debug);
 
