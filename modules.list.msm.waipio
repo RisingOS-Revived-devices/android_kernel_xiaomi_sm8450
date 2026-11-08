@@ -31,6 +31,7 @@ gh_virt_wdt.ko
 icc-bcm-voter.ko
 icc-debug.ko
 iommu-logger.ko
+kryo_arm64_edac.ko
 llcc-qcom.ko
 mac80211.ko
 mem_buf_dev.ko
