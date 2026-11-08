@@ -14,6 +14,8 @@
 
 #define KMSG_COMPONENT "zram"
 #define pr_fmt(fmt) KMSG_COMPONENT ": " fmt
+/* memcg soft_limit value Xiaomi userspace sets on cgroups whose pages are important */
+#define MAGIC_NEMBER 8988778932
 
 #include <linux/module.h>
 #include <linux/kernel.h>
@@ -33,6 +35,7 @@
 #include <linux/debugfs.h>
 #include <linux/cpuhotplug.h>
 #include <linux/part_stat.h>
+#include <linux/memcontrol.h>
 
 #include "zram_drv.h"
 
@@ -708,6 +711,8 @@ static ssize_t writeback_store(struct device *dev,
 		if (mode & INCOMPRESSIBLE_WRITEBACK &&
 		    !zram_test_flag(zram, index, ZRAM_INCOMPRESSIBLE))
 			goto next;
+		if (zram_test_flag(zram, index, ZRAM_IMPORTANT))
+			goto next;
 
 		/*
 		 * Clearing ZRAM_UNDER_WB is duty of caller.
@@ -1173,7 +1178,7 @@ static ssize_t mm_stat_show(struct device *dev,
 	max_used = atomic_long_read(&zram->stats.max_used_pages);
 
 	ret = scnprintf(buf, PAGE_SIZE,
-			"%8llu %8llu %8llu %8lu %8ld %8llu %8lu %8llu %8llu\n",
+			"%8llu %8llu %8llu %8lu %8ld %8llu %8lu %8llu %8llu %8llu %8llu\n",
 			orig_size << PAGE_SHIFT,
 			(u64)atomic64_read(&zram->stats.compr_data_size),
 			mem_used << PAGE_SHIFT,
@@ -1182,7 +1187,9 @@ static ssize_t mm_stat_show(struct device *dev,
 			(u64)atomic64_read(&zram->stats.same_pages),
 			atomic_long_read(&pool_stats.pages_compacted),
 			(u64)atomic64_read(&zram->stats.huge_pages),
-			(u64)atomic64_read(&zram->stats.huge_pages_since));
+			(u64)atomic64_read(&zram->stats.huge_pages_since),
+			(u64)atomic64_read(&zram->stats.important_pages),
+			(u64)atomic64_read(&zram->stats.important_compr_data_size) / 4096);
 	up_read(&zram->init_lock);
 
 	return ret;
@@ -1293,6 +1300,13 @@ static void zram_free_page(struct zram *zram, size_t index)
 
 	if (zram_test_flag(zram, index, ZRAM_INCOMPRESSIBLE))
 		zram_clear_flag(zram, index, ZRAM_INCOMPRESSIBLE);
+
+	if (zram_test_flag(zram, index, ZRAM_IMPORTANT)) {
+		zram_clear_flag(zram, index, ZRAM_IMPORTANT);
+		atomic64_dec(&zram->stats.important_pages);
+		atomic64_sub(zram_get_obj_size(zram, index),
+			     &zram->stats.important_compr_data_size);
+	}
 
 	zram_set_priority(zram, index, 0);
 
@@ -1442,6 +1456,7 @@ static int zram_write_page(struct zram *zram, struct page *page, u32 index)
 	struct zcomp_strm *zstrm;
 	unsigned long element = 0;
 	enum zram_pageflags flags = 0;
+	struct mem_cgroup *memcg = page_memcg(page);
 
 	mem = kmap_atomic(page);
 	if (page_same_filled(mem, &element)) {
@@ -1551,6 +1566,12 @@ out:
 		zram_set_handle(zram, index, handle);
 		zram_set_obj_size(zram, index, comp_len);
 	}
+
+	if (memcg && READ_ONCE(memcg->soft_limit) == MAGIC_NEMBER) {
+		zram_set_flag(zram, index, ZRAM_IMPORTANT);
+		atomic64_inc(&zram->stats.important_pages);
+		atomic64_add(comp_len, &zram->stats.important_compr_data_size);
+	}
 	zram_slot_unlock(zram, index);
 
 	/* Update stats */
@@ -1607,6 +1628,7 @@ static int zram_recompress(struct zram *zram, u32 index, struct page *page,
 	unsigned int class_index_new;
 	u32 num_recomps = 0;
 	void *src, *dst;
+	bool important;
 	int ret;
 
 	handle_old = zram_get_handle(zram, index);
@@ -1723,10 +1745,16 @@ static int zram_recompress(struct zram *zram, u32 index, struct page *page,
 
 	zs_unmap_object(zram->mem_pool, handle_new);
 
+	important = zram_test_flag(zram, index, ZRAM_IMPORTANT);
 	zram_free_page(zram, index);
 	zram_set_handle(zram, index, handle_new);
 	zram_set_obj_size(zram, index, comp_len_new);
 	zram_set_priority(zram, index, prio);
+	if (important) {
+		zram_set_flag(zram, index, ZRAM_IMPORTANT);
+		atomic64_inc(&zram->stats.important_pages);
+		atomic64_add(comp_len_new, &zram->stats.important_compr_data_size);
+	}
 
 	atomic64_add(comp_len_new, &zram->stats.compr_data_size);
 	atomic64_inc(&zram->stats.pages_stored);

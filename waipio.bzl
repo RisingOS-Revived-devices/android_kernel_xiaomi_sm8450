@@ -179,6 +179,7 @@ def define_waipio():
         "drivers/soc/qcom/msm_show_epoch.ko",
         "drivers/soc/qcom/panel_event_notifier.ko",
         "drivers/soc/qcom/pdr_interface.ko",
+        "drivers/soc/qcom/pmic-glink-debug.ko",
         "drivers/soc/qcom/pmic-pon-log.ko",
         "drivers/soc/qcom/qcom_aoss.ko",
         "drivers/soc/qcom/qcom_cpu_vendor_hooks.ko",

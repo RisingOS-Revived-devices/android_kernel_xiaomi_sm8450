@@ -1048,6 +1048,14 @@ config MI_CHARGER_M81
 	  Say Y here to enable xiaomi properties similar to
 	  qti_battery_charger_main_m81 module on stock
 
+config MI_CHARGER_M81_OS3_PROPS
+	bool "Use the M81 xiaomi property ids of the HyperOS 3 ADSP firmware"
+	depends on MI_CHARGER_M81
+	help
+	  Say Y here to number the xiaomi charger properties the way the
+	  HyperOS 3 qti_battery_charger_main_m81 module of zeus and cupid
+	  does, so the ADSP reads and writes the intended properties.
+
 config XM_POWER_SUPPLY
 	tristate "Xiaomi power supply config"
 	help

@@ -208,10 +208,11 @@ enum xm_property_id {
 	XM_PROP_INPUT_SUSPEND,
 	XM_PROP_FASTCHGMODE,
 	XM_PROP_NIGHT_CHARGING,
-#ifndef CONFIG_MI_CHARGER_M81
+#if !defined(CONFIG_MI_CHARGER_M81) || defined(CONFIG_MI_CHARGER_M81_OS3_PROPS)
+	/* the HyperOS 3 M81 firmware has these two ids, the nodes stay hidden on M81 */
 	XM_PROP_BLANK_STATUS,
 	XM_PROP_SCREEN_CCTOG,
-#endif /* !CONFIG_MI_CHARGER_M81 */
+#endif
 	XM_PROP_SOC_DECIMAL,
 	XM_PROP_SOC_DECIMAL_RATE,
 	XM_PROP_QUICK_CHARGE_TYPE,
@@ -621,6 +622,10 @@ struct battery_chg_dev {
 	u32				thermal_fcc_ua;
 	u32				restrict_fcc_ua;
 	u32				last_fcc_ua;
+	/* constant_charge_current request (UINT_MAX: none) and its ceiling (0: none) */
+	struct mutex			fcc_lock;
+	u32				fcc_req_ua;
+	u32				fcc_max_ua;
 	u32				usb_icl_ua;
 	u32				reverse_chg_flag;
 	u32				boost_mode;
