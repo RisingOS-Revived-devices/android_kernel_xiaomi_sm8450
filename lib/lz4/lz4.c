@@ -3405,4 +3405,19 @@ char *LZ4_slideInputBuffer(void *state)
 		->internal_donotuse.dictionary;
 }
 
+/*
+ * Exports of the old in-kernel LZ4 fork that are not exported above. They are
+ * part of the GKI KMI (android/abi_gki_aarch64*), so keep providing them.
+ */
+EXPORT_SYMBOL(LZ4_compress_destSize);
+EXPORT_SYMBOL(LZ4_compress_fast_continue);
+EXPORT_SYMBOL(LZ4_decompress_safe);
+EXPORT_SYMBOL(LZ4_decompress_safe_partial);
+EXPORT_SYMBOL(LZ4_decompress_fast);
+EXPORT_SYMBOL(LZ4_setStreamDecode);
+EXPORT_SYMBOL(LZ4_decompress_safe_continue);
+EXPORT_SYMBOL(LZ4_decompress_fast_continue);
+EXPORT_SYMBOL(LZ4_decompress_safe_usingDict);
+EXPORT_SYMBOL(LZ4_decompress_fast_usingDict);
+
 #endif /* LZ4_COMMONDEFS_ONLY */

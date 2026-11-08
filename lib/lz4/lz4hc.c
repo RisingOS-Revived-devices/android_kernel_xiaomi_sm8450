@@ -2792,3 +2792,12 @@ char *LZ4_slideInputBufferHC(void *LZ4HC_Data)
 	/* ugly conversion trick, required to evade (const char*) -> (char*) cast-qual warning :( */
 	return (char *)(uptrval)bufferStart;
 }
+
+/*
+ * Exports of the old in-kernel LZ4HC fork that are not exported above. They
+ * are part of the GKI KMI (android/abi_gki_aarch64*), so keep providing them.
+ */
+EXPORT_SYMBOL(LZ4_resetStreamHC);
+EXPORT_SYMBOL(LZ4_loadDictHC);
+EXPORT_SYMBOL(LZ4_compress_HC_continue);
+EXPORT_SYMBOL(LZ4_saveDictHC);
