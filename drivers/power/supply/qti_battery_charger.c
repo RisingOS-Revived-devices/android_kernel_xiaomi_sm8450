@@ -1646,6 +1646,9 @@ static enum power_supply_property battery_props_waipio[] = {
 
 static const struct power_supply_desc batt_psy_desc_waipio = {
 	.name			= "battery",
+#if defined(CONFIG_BQ_FUEL_GAUGE)
+	.no_thermal		= true,
+#endif
 	.type			= POWER_SUPPLY_TYPE_BATTERY,
 	.properties		= battery_props_waipio,
 	.num_properties		= ARRAY_SIZE(battery_props_waipio),
