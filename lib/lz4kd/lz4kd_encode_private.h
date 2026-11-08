@@ -132,4 +132,3 @@ int lz4kd_encode_fast(
 #endif
 
 #endif /* _LZ4KD_ENCODE_PRIVATE_H */
-
