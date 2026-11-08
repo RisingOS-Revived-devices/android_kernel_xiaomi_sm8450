@@ -910,6 +910,42 @@ config UCLAMP_BUCKETS_COUNT
 
 endmenu
 
+menu "FAIR Scheuler tunables"
+
+choice
+	prompt "Utilization's PELT half-Life"
+	default PELT_UTIL_HALFLIFE_DEFAULT
+	help
+	  Allows choosing one of the possible values for the PELT half-life to
+	  be used for the update of the utilization of tasks and CPUs.
+	  The half-life is the amount of [ms] required by the PELT signal to
+	  build up to 50% utilization. The higher the half-life the longer it
+	  takes for a task to be represented as a big one.
+
+	  Note that adjusting PELT half-life via kernel parameters is only
+	  allowed when PELT_UTIL_HALFLIFE_DEFAULT is selected.
+
+	  If not sure, use the default.
+
+config PELT_UTIL_HALFLIFE_DEFAULT
+	bool "Default (32 ms)"
+
+config PELT_UTIL_HALFLIFE_32
+	bool "32 ms"
+
+config PELT_UTIL_HALFLIFE_16
+	bool "16 ms"
+
+config PELT_UTIL_HALFLIFE_12
+	bool "12 ms"
+
+config PELT_UTIL_HALFLIFE_8
+	bool "8 ms"
+
+endchoice
+
+endmenu # FAIR Scheduler tunables"
+
 #
 # For architectures that want to enable the support for NUMA-affine scheduler
 # balancing logic:
@@ -1325,6 +1361,28 @@ config CHECKPOINT_RESTORE
 	  entries.
 
 	  If unsure, say N here.
+
+config SCHED_BORE
+	bool "Burst-Oriented Response Enhancer"
+	default y
+	help
+	  In Desktop and Mobile computing, one might prefer interactive
+	  tasks to keep responsive no matter what they run in the background.
+
+	  Enabling this kernel feature modifies the scheduler to discriminate
+	  tasks by their burst time (runtime since it last went sleeping or
+	  yielding state) and prioritize those that run less bursty.
+	  Such tasks usually include window compositor, widgets backend,
+	  terminal emulator, video playback, games and so on.
+	  With a little impact to scheduling fairness, it may improve
+	  responsiveness especially under heavy background workload.
+
+	  7.0.0 adds a sleep credit (sched_credit_cap_us) that shortens the
+	  deadline of a freshly woken task by its capped sleep time, and
+	  slice-protection overrides (sched_burst_protect_slice_lv,
+	  sched_burst_inherit_type, sched_burst_smoothness).
+
+	  If unsure, say Y here.
 
 config SCHED_AUTOGROUP
 	bool "Automatic process group scheduling"

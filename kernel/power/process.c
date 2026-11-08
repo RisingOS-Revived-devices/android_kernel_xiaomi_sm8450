@@ -25,7 +25,7 @@
 /*
  * Timeout for stopping processes
  */
-unsigned int __read_mostly freeze_timeout_msecs = 20 * MSEC_PER_SEC;
+unsigned int __read_mostly freeze_timeout_msecs = 3 * MSEC_PER_SEC;
 
 static int try_to_freeze_tasks(bool user_only)
 {
@@ -41,7 +41,7 @@ static int try_to_freeze_tasks(bool user_only)
 	int sleep_usecs = USEC_PER_MSEC;
 	bool todo_logging_on = false;
 
-	pr_info("Freezing %s\n", what);
+	pr_debug("Freezing %s\n", what);
 
 	start = ktime_get_boottime();
 
@@ -66,13 +66,13 @@ static int try_to_freeze_tasks(bool user_only)
 			todo += wq_busy;
 		}
 
-		if (!todo || time_after(jiffies, end_time))
-			break;
-
 		if (pm_wakeup_pending()) {
 			wakeup = true;
 			break;
 		}
+
+		if (!todo || time_after(jiffies, end_time))
+			break;
 
 		/*
 		 * We need to retry, but first give the freezing tasks some
@@ -116,11 +116,11 @@ static int try_to_freeze_tasks(bool user_only)
 
 		trace_android_vh_try_to_freeze_todo(todo, elapsed_msecs, wq_busy);
 	} else {
-		pr_info("Freezing %s completed (elapsed %d.%03d seconds)\n",
+		pr_debug("Freezing %s completed (elapsed %d.%03d seconds)\n",
 			what, elapsed_msecs / 1000, elapsed_msecs % 1000);
 	}
 
-	return todo ? -EBUSY : 0;
+	return todo || wakeup ? -EBUSY : 0;
 }
 
 /**
@@ -151,15 +151,6 @@ int freeze_processes(void)
 		__usermodehelper_set_disable_depth(UMH_DISABLED);
 
 	BUG_ON(in_atomic());
-
-	/*
-	 * Now that the whole userspace is frozen we need to disable
-	 * the OOM killer to disallow any further interference with
-	 * killable tasks. There is no guarantee oom victims will
-	 * ever reach a point they go away we have to wait with a timeout.
-	 */
-	if (!error && !oom_killer_disable(msecs_to_jiffies(freeze_timeout_msecs)))
-		error = -EBUSY;
 
 	if (error)
 		thaw_processes();
@@ -199,9 +190,7 @@ void thaw_processes(void)
 	pm_freezing = false;
 	pm_nosig_freezing = false;
 
-	oom_killer_enable();
-
-	pr_info("Restarting tasks ... ");
+	pr_debug("Restarting tasks ... ");
 
 	__usermodehelper_set_disable_depth(UMH_FREEZING);
 	thaw_workqueues();
@@ -220,7 +209,7 @@ void thaw_processes(void)
 	usermodehelper_enable();
 
 	schedule();
-	pr_cont("done.\n");
+	pr_debug("done.\n");
 	trace_suspend_resume(TPS("thaw_processes"), 0, false);
 }
 
@@ -229,7 +218,7 @@ void thaw_kernel_threads(void)
 	struct task_struct *g, *p;
 
 	pm_nosig_freezing = false;
-	pr_info("Restarting kernel threads ... ");
+	pr_debug("Restarting kernel threads ... ");
 
 	thaw_workqueues();
 
@@ -241,5 +230,5 @@ void thaw_kernel_threads(void)
 	read_unlock(&tasklist_lock);
 
 	schedule();
-	pr_cont("done.\n");
+	pr_debug("done.\n");
 }

@@ -569,10 +569,33 @@ struct sched_entity {
 	struct sched_avg		avg;
 #endif
 
+#ifdef CONFIG_SCHED_BORE
+	/*
+	 * BORE (include/linux/sched/bore.h) per-task state, kept in the KABI
+	 * slots so the struct layout and the KMI stay unchanged.
+	 */
+	ANDROID_KABI_USE(1, u64 burst_time);
+	_ANDROID_KABI_REPLACE(_ANDROID_KABI_RESERVE(2),
+		struct {
+			u8 prev_burst_penalty;
+			u8 curr_burst_penalty;
+			u8 burst_penalty;
+			u8 burst_score;
+			/* set while the task sleeps in futex_wait_queue() */
+			bool futex_waiting;
+			/* set while reweight_task_by_prio() runs reweight_task() */
+			bool stop_bore_update;
+		}
+	);
+	/* sleep timestamp for the 7.0.0 wakeup sleep credit */
+	ANDROID_KABI_USE(3, u64 credit_sleep);
+	ANDROID_KABI_RESERVE(4);
+#else /* !CONFIG_SCHED_BORE */
 	ANDROID_KABI_RESERVE(1);
 	ANDROID_KABI_RESERVE(2);
 	ANDROID_KABI_RESERVE(3);
 	ANDROID_KABI_RESERVE(4);
+#endif /* CONFIG_SCHED_BORE */
 };
 
 struct sched_rt_entity {

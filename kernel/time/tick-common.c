@@ -498,7 +498,7 @@ void tick_resume(void)
 #ifdef CONFIG_SUSPEND
 static DEFINE_RAW_SPINLOCK(tick_freeze_lock);
 static DEFINE_WAIT_OVERRIDE_MAP(tick_freeze_map, LD_WAIT_SLEEP);
-static unsigned int tick_freeze_depth;
+static unsigned long tick_frozen_mask;
 
 /**
  * tick_freeze - Suspend the local tick and (possibly) timekeeping.
@@ -511,10 +511,17 @@ static unsigned int tick_freeze_depth;
  */
 void tick_freeze(void)
 {
+	int cpu = smp_processor_id();
+
 	raw_spin_lock(&tick_freeze_lock);
 
-	tick_freeze_depth++;
-	if (tick_freeze_depth == num_online_cpus()) {
+	tick_frozen_mask |= BIT(cpu);
+	if (tick_do_timer_cpu == cpu) {
+		cpu = ffz(tick_frozen_mask);
+		tick_do_timer_cpu = (cpu < nr_cpu_ids) ? cpu :
+			TICK_DO_TIMER_NONE;
+	}
+	if (tick_frozen_mask == *cpumask_bits(cpu_online_mask)) {
 		trace_suspend_resume(TPS("timekeeping_freeze"),
 				     smp_processor_id(), true);
 		/*
@@ -551,9 +558,11 @@ void tick_freeze(void)
  */
 void tick_unfreeze(void)
 {
+	int cpu = smp_processor_id();
+
 	raw_spin_lock(&tick_freeze_lock);
 
-	if (tick_freeze_depth == num_online_cpus()) {
+	if (tick_frozen_mask == *cpumask_bits(cpu_online_mask)) {
 		/*
 		 * Similar to tick_freeze(). On resumption the first CPU may
 		 * acquire uncontended sleeping locks while other CPUs block on
@@ -571,8 +580,10 @@ void tick_unfreeze(void)
 		touch_softlockup_watchdog();
 		tick_resume_local();
 	}
+	if (tick_do_timer_cpu == TICK_DO_TIMER_NONE)
+		tick_do_timer_cpu = cpu;
 
-	tick_freeze_depth--;
+	tick_frozen_mask &= ~BIT(cpu);
 
 	raw_spin_unlock(&tick_freeze_lock);
 }

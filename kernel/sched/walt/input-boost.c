@@ -15,6 +15,7 @@
 #include <linux/time.h>
 #include <linux/sysfs.h>
 #include <linux/pm_qos.h>
+#include <linux/soc/qcom/panel_event_notifier.h>
 
 #include "walt.h"
 
@@ -49,6 +50,7 @@ static DEFINE_PER_CPU(struct cpu_sync, sync_info);
 static struct workqueue_struct *input_boost_wq;
 
 static struct work_struct input_boost_work;
+static struct work_struct powerkey_input_boost_work;
 
 static bool sched_boost_active;
 
@@ -160,8 +162,76 @@ static void do_input_boost(struct work_struct *work)
 					msecs_to_jiffies(sysctl_input_boost_ms));
 }
 
+static void do_powerkey_input_boost(struct work_struct *work)
+{
+	unsigned int cpu, ret;
+	struct cpu_sync *i_sync_info;
+
+	cancel_delayed_work_sync(&input_boost_rem);
+	if (sched_boost_active) {
+		sched_set_boost(0);
+		sched_boost_active = false;
+	}
+
+	/* Set the powerkey_input_boost_min for all CPUs in the system */
+	pr_debug("Setting powerkey input boost min for all CPUs\n");
+	for_each_possible_cpu(cpu) {
+		i_sync_info = &per_cpu(sync_info, cpu);
+		i_sync_info->input_boost_min = sysctl_powerkey_input_boost_freq[cpu];
+	}
+
+	/* Update policies for all online CPUs */
+	update_policy_online();
+
+	/* Enable scheduler boost to migrate tasks to big cluster */
+	if (sysctl_powerkey_sched_boost_on_input) {
+		ret = sched_set_boost(sysctl_powerkey_sched_boost_on_input);
+		if (ret)
+			pr_err("input-boost: sched boost enable failed\n");
+		else
+			sched_boost_active = true;
+	}
+
+	queue_delayed_work(input_boost_wq, &input_boost_rem,
+					msecs_to_jiffies(sysctl_powerkey_input_boost_ms));
+}
+
 static void inputboost_input_event(struct input_handle *handle,
 		unsigned int type, unsigned int code, int value)
+{
+	u64 now;
+	int cpu;
+	int enabled = 0;
+
+	for_each_possible_cpu(cpu) {
+		if (sysctl_input_boost_freq[cpu] > 0) {
+			enabled = 1;
+			break;
+		}
+	}
+	if (!enabled)
+		return;
+
+	now = ktime_to_us(ktime_get());
+	if (now - last_input_time < MIN_INPUT_INTERVAL)
+		return;
+
+	if (type == EV_KEY && (code == KEY_POWER || code == KEY_WAKEUP)) {
+		if (work_pending(&powerkey_input_boost_work))
+			return;
+
+		queue_work(input_boost_wq, &powerkey_input_boost_work);
+	} else {
+		if (work_pending(&input_boost_work) || work_pending(&powerkey_input_boost_work))
+			return;
+
+		queue_work(input_boost_wq, &input_boost_work);
+	}
+
+	last_input_time = ktime_to_us(ktime_get());
+}
+
+void touch_irq_boost(void)
 {
 	u64 now;
 	int cpu;
@@ -184,8 +254,10 @@ static void inputboost_input_event(struct input_handle *handle,
 		return;
 
 	queue_work(input_boost_wq, &input_boost_work);
+
 	last_input_time = ktime_to_us(ktime_get());
 }
+EXPORT_SYMBOL(touch_irq_boost);
 
 static int inputboost_input_connect(struct input_handler *handler,
 		struct input_dev *dev, const struct input_device_id *id)
@@ -260,10 +332,31 @@ static struct input_handler inputboost_input_handler = {
 	.id_table	= inputboost_ids,
 };
 
+static void input_boost_panel_event_notifier_callback(enum panel_event_notifier_tag tag,
+			struct panel_event_notification *notification, void *data)
+{
+	if (!notification) {
+		pr_err("%s: Invalid panel notification\n", __func__);
+		return;
+	}
+
+	pr_debug("%s: panel event received, type: %d\n", __func__, notification->notif_type);
+	switch (notification->notif_type) {
+		case DRM_PANEL_EVENT_UNBLANK:
+			if (!work_pending(&powerkey_input_boost_work))
+				queue_work(input_boost_wq, &powerkey_input_boost_work);
+			break;
+		default:
+			pr_debug("%s: ignore panel event: %d\n", __func__, notification->notif_type);
+			break;
+	}
+}
+
 struct kobject *input_boost_kobj;
 int input_boost_init(void)
 {
 	int cpu, ret;
+	void *cookie;
 	struct cpu_sync *s;
 	struct cpufreq_policy *policy;
 	struct freq_qos_request *req;
@@ -273,6 +366,7 @@ int input_boost_init(void)
 		return -EFAULT;
 
 	INIT_WORK(&input_boost_work, do_input_boost);
+	INIT_WORK(&powerkey_input_boost_work, do_powerkey_input_boost);
 	INIT_DELAYED_WORK(&input_boost_rem, do_input_boost_rem);
 
 	for_each_possible_cpu(cpu) {
@@ -296,5 +390,16 @@ int input_boost_init(void)
 	}
 
 	ret = input_register_handler(&inputboost_input_handler);
+	if (ret < 0) {
+		pr_err("%s: Failed to register input handler\n", __func__);
+		return ret;
+	}
+
+	cookie = panel_event_notifier_register(
+			PANEL_EVENT_NOTIFICATION_PRIMARY, PANEL_EVENT_NOTIFIER_CLIENT_CPU_BOOST,
+			NULL /* active_panel */, input_boost_panel_event_notifier_callback, NULL);
+	if (IS_ERR_OR_NULL(cookie))
+		pr_err("%s: Failed to register panel notifier\n", __func__);
+
 	return 0;
 }

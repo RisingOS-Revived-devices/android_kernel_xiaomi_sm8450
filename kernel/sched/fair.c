@@ -58,6 +58,9 @@
 #include "autogroup.h"
 
 #include <trace/hooks/sched.h>
+#ifdef CONFIG_SCHED_BORE
+#include <linux/sched/bore.h>
+#endif /* CONFIG_SCHED_BORE */
 #include <trace/hooks/dtask.h>
 
 EXPORT_TRACEPOINT_SYMBOL_GPL(sched_stat_runtime);
@@ -75,7 +78,7 @@ EXPORT_TRACEPOINT_SYMBOL_GPL(sched_stat_runtime);
  *
  * (default: 6ms * (1 + ilog(ncpus)), units: nanoseconds)
  */
-unsigned int sysctl_sched_latency			= 6000000ULL;
+unsigned int sysctl_sched_latency			= 16000000ULL;
 EXPORT_SYMBOL_GPL(sysctl_sched_latency);
 
 /*
@@ -88,17 +91,30 @@ EXPORT_SYMBOL_GPL(sysctl_sched_latency);
  *   SCHED_TUNABLESCALING_LINEAR - scaled linear, *ncpus
  *
  * (default SCHED_TUNABLESCALING_LOG = *(1+ilog(ncpus))
+ *
+ * NONE here: the latency/slice values below are chosen for this class of
+ * device already, the ncpus multiplier would only scale them again.
  */
-unsigned int sysctl_sched_tunable_scaling = SCHED_TUNABLESCALING_LOG;
+unsigned int sysctl_sched_tunable_scaling = SCHED_TUNABLESCALING_NONE;
 
 /*
  * Minimal preemption granularity for CPU-bound tasks:
  *
  * (default: 0.70 msec * (1 + ilog(ncpus)), units: nanoseconds)
+ *
+ * 2 ms unscaled (as on the 5.10 EEVDF backport): sets the EEVDF request
+ * size and with it the context-switch rate; 0.7 ms * 4 on 8 CPUs is costly
+ * on a little core where cache/TLB refill is a real part of the slice.
  */
-unsigned int sysctl_sched_base_slice			= 700000ULL;
+unsigned int sysctl_sched_base_slice			= 2000000ULL;
 EXPORT_SYMBOL_GPL(sysctl_sched_base_slice);
-static unsigned int normalized_sysctl_sched_base_slice	= 700000ULL;
+static unsigned int normalized_sysctl_sched_base_slice	= 2000000ULL;
+
+/*
+ * Minimum virtual deadline advantage a wakee needs to preempt the current
+ * task (see check_preempt_wakeup()); 2 ms as on the 5.10 EEVDF backport.
+ */
+static unsigned int sched_wakeup_granularity __read_mostly = 2000000U;
 
 /*
  * After fork, child runs first. If set to 0 (default) then
@@ -748,6 +764,18 @@ static void update_entity_lag(struct cfs_rq *cfs_rq, struct sched_entity *se)
 	SCHED_WARN_ON(!se->on_rq);
 
 	se->vlag = entity_lag(avg_vruntime(cfs_rq), se);
+#ifdef CONFIG_SCHED_BORE
+	/*
+	 * BORE 6.8.0: halve the clamp so a sleeper restores at most one
+	 * slice of credit/debt on wake; long sleepers stop banking large
+	 * catch-up credit.
+	 */
+	if (likely(sched_bore)) {
+		s64 limit = calc_delta_fair(max_t(u64, 2 * se->slice, TICK_NSEC), se) >> 1;
+
+		se->vlag = clamp(se->vlag, -limit, limit);
+	}
+#endif /* CONFIG_SCHED_BORE */
 }
 
 /*
@@ -787,6 +815,640 @@ int entity_eligible(struct cfs_rq *cfs_rq, struct sched_entity *se)
 {
 	return vruntime_eligible(cfs_rq, se->vruntime);
 }
+
+#ifdef CONFIG_SCHED_BORE
+/*
+ * Upstream BORE 7.0.0 (stable, firelzrd 1e2f57ad) inside the GKI-safe
+ * integration: the per-task state lives in the struct sched_entity KABI
+ * slots (see include/linux/sched.h), so upstream's struct bore_ctx
+ * task_struct field is not ported. 7.0.0 adds the sleep-credit feature (sched_credit_cap_us
+ * + sched_credit_key: a task's wakeup deadline is shortened by its capped
+ * sleep time), the protect_slice_lv override pair, sched_burst_inherit_type
+ * (0 off / 1 direct parent / 2 ancestor-hub lineage), the single-integer
+ * smoothness, and the uncapped penalty (clamped at the nice-40 boundary
+ * instead of the old local sched_burst_penalty_max cap). Kthread
+ * exclusion and the fork-time inheritance walks are the 7.0.0 defaults.
+ *
+ * Not ported: the timestamped subtree/group burst caches (7.0.0 uses them
+ * to amortize the child walks; the inheritance here reads the live
+ * penalty instead, so those caches need no storage).
+ */
+DEFINE_STATIC_KEY_TRUE(sched_bore_key);
+DEFINE_STATIC_KEY_TRUE(sched_burst_inherit_key);
+DEFINE_STATIC_KEY_TRUE(sched_burst_ancestor_key);
+DEFINE_STATIC_KEY_TRUE (sched_burst_protect_slice_cond_key);
+DEFINE_STATIC_KEY_FALSE(sched_burst_protect_slice_prefer_key);
+DEFINE_STATIC_KEY_FALSE(sched_credit_key);
+
+/*
+ * 7.0.0 values except two mobile-tuning knobs this tree keeps:
+ * penalty_offset 27 (134 ms first demotion protects frame threads and
+ * nice-0 loads, where the 7.0.0 default 24 would demote them in a
+ * ~100 ms burst) and penalty_scale 1024 (the 7.0.0 1536 demotes ~30%
+ * faster; 1024 was the tuned 6.8.0 value).
+ */
+u8   __read_mostly sched_bore                   = 1;
+u8   __read_mostly sched_burst_inherit_type     = 2;
+u8   __read_mostly sched_burst_protect_slice_lv = 1;
+u8   __read_mostly sched_burst_smoothness       = 1;
+u8   __read_mostly sched_burst_penalty_offset   = 27;
+uint __read_mostly sched_burst_penalty_scale    = 1024;
+uint __read_mostly sched_burst_cache_lifetime   = 75000000;
+uint __read_mostly sched_credit_cap_us          = 16000;
+
+#define BURST_INHERIT_SCAN_LIMIT 63
+
+static void update_inherit_type(void);
+
+static inline u32 log2p1_u64_u32fp(u64 v, u8 fp)
+{
+	int clz, exponent;
+	u32 mantissa;
+
+	if (unlikely(!v))
+		return 0;
+	clz = __builtin_clzll(v);
+	exponent = 64 - clz;
+	mantissa = (u32)((v << clz) << 1 >> (64 - fp));
+	return exponent << fp | mantissa;
+}
+
+static inline u32 calc_burst_penalty(u64 burst_time)
+{
+	u32 greed = log2p1_u64_u32fp(burst_time, 8);
+	u32 tolerance = sched_burst_penalty_offset << 8;
+	s32 diff = (s32)(greed - tolerance);
+	u32 penalty = diff & ~(diff >> 31);
+	u32 scaled_penalty = penalty * sched_burst_penalty_scale >> 10;
+	s32 overflow = scaled_penalty - ((40U << 8) - 1);
+
+	/* 7.0.0: saturate at the nice-40 boundary, no local cap. */
+	return scaled_penalty - (overflow & ~(overflow >> 31));
+}
+
+/* set_load_weight() with the prio supplied instead of derived from static_prio. */
+static void reweight_task_by_prio(struct task_struct *p, int prio)
+{
+	struct sched_entity *se = &p->se;
+
+	/* SCHED_IDLE keeps WEIGHT_IDLEPRIO, as in set_load_weight(). */
+	if (task_has_idle_policy(p))
+		return;
+
+	/*
+	 * TASK_NEW is not on a cfs_rq and its load_avg is not attached yet:
+	 * reweight_entity() would strip unattached load from the parent's
+	 * cfs_rq and leave this se at load_avg 0.
+	 */
+	if (unlikely(READ_ONCE(p->__state) & TASK_NEW)) {
+		se->load.weight = scale_load(sched_prio_to_weight[prio]);
+		se->load.inv_weight = sched_prio_to_wmult[prio];
+	} else {
+		/*
+		 * reweight_task() -> reweight_entity() runs update_curr() on
+		 * the current entity; keep that path from recursing back
+		 * into the BORE penalty accounting of the task being
+		 * reweighted.
+		 */
+		se->stop_bore_update = true;
+		reweight_task(p, prio);
+		se->stop_bore_update = false;
+	}
+}
+
+/*
+ * Apply the ratchet (penalty = max(prev, curr)) to the score field and
+ * reweight the task when the effective prio moved.
+ */
+static void apply_burst_penalty(struct sched_entity *se, struct task_struct *p)
+{
+	u8 old_prio = effective_prio_bore(p);
+
+	se->burst_penalty = max(se->prev_burst_penalty, se->curr_burst_penalty);
+
+	/* 7.0.0: kernel threads do not accrue a demotion score. */
+	if (p->flags & PF_KTHREAD)
+		se->burst_score = 0;
+	else
+		se->burst_score = se->burst_penalty >> 8;
+
+	if (effective_prio_bore(p) != old_prio)
+		reweight_task_by_prio(p, effective_prio_bore(p));
+}
+
+/*
+ * Exec-time ratchet. @delta_exec is the slice just executed by @p's leaf
+ * entity (update_curr() already charged it to vruntime).
+ */
+static void update_curr_bore(struct task_struct *p, u64 delta_exec)
+{
+	struct sched_entity *se = &p->se;
+
+	if (unlikely(READ_ONCE(se->stop_bore_update)))
+		return;
+
+	se->burst_time += delta_exec;
+	se->curr_burst_penalty = calc_burst_penalty(se->burst_time);
+
+	if (se->curr_burst_penalty <= se->prev_burst_penalty)
+		return;
+
+	apply_burst_penalty(se, p);
+}
+
+static inline u32 binary_smooth(u32 new, u32 old)
+{
+	u32 is_growing = (new > old);
+	u32 increment = (new - old) * is_growing;
+	u32 shift = sched_burst_smoothness;
+	u32 smoothed = old + ((increment + (1U << shift) - 1) >> shift);
+
+	return (new & ~(-is_growing)) | (smoothed & (-is_growing));
+}
+
+/*
+ * Sleep / yield forgiveness: fold the running burst into the baseline
+ * (7.0.0 single smoothness, round-up so small increments never stall)
+ * and restart the burst clock. The ratchet then releases to the smoothed
+ * baseline; the caller rescales any remaining slice (yield path).
+ */
+static void restart_burst_bore(struct task_struct *p)
+{
+	struct sched_entity *se = &p->se;
+	u32 new_penalty = binary_smooth(se->curr_burst_penalty,
+					se->prev_burst_penalty);
+
+	se->prev_burst_penalty = new_penalty;
+	se->curr_burst_penalty = 0;
+	se->burst_time = 0;
+	apply_burst_penalty(se, p);
+}
+
+/*
+ * BORE 6.8.0: on yield the burst may demote (restart_burst raises the
+ * effective prio). Rescale the remaining virtual slice from the old weight
+ * domain to the new one so the yielder's deadline does not jump with the
+ * weight.
+ */
+static void restart_burst_rescale_deadline_bore(struct task_struct *p)
+{
+	struct sched_entity *se = &p->se;
+	s64 vscaled, vremain = se->deadline - se->vruntime;
+	u8 old_prio = effective_prio_bore(p);
+
+	restart_burst_bore(p);
+
+	if (old_prio > effective_prio_bore(p)) {
+		u64 mag = vremain < 0 ? (u64)(-vremain) : (u64)vremain;
+
+		vscaled = mul_u64_u32_shr(mag,
+					  sched_prio_to_weight[old_prio], 10);
+		vscaled = mul_u64_u32_shr(vscaled,
+					  sched_prio_to_wmult[
+						effective_prio_bore(p)], 22);
+		if (unlikely(vremain < 0))
+			vscaled = -vscaled;
+		se->deadline = se->vruntime + vscaled;
+	}
+}
+
+/*
+ * 7.0.0 sleep credit: remember when the task went to sleep; on its next
+ * wakeup place_entity() shortens its deadline by the capped sleep.
+ */
+void bore_note_sleep(struct task_struct *p, u64 now)
+{
+	p->se.credit_sleep = now;
+}
+
+u64 bore_credit_ns(struct task_struct *p)
+{
+	u64 cap = (u64)sched_credit_cap_us * 1000ULL;
+	u64 slept = 0, credit = 0;
+
+	if (p->se.credit_sleep) {
+		slept = rq_clock(task_rq(p)) - p->se.credit_sleep;
+		if ((s64)slept > 0) {
+			p->se.credit_sleep = 0;
+			credit = slept < cap ? slept : cap;
+		} else {
+			slept = 0;
+		}
+	}
+
+	return credit;
+}
+
+static inline bool task_is_bore_eligible(struct task_struct *p)
+{
+	return p && p->sched_class == &fair_sched_class && !p->exit_state;
+}
+
+static inline u32 count_children_upto2(struct task_struct *p)
+{
+	struct list_head *head = &p->children;
+	struct list_head *first = READ_ONCE(head->next);
+	struct list_head *second = READ_ONCE(first->next);
+
+	return (first != head) + (second != head);
+}
+
+#define for_each_child_task(p, t) \
+	list_for_each_entry_rcu(t, &(p)->children, sibling)
+
+/*
+ * Live-penalty inheritance (7.0.0 sched_burst_inherit_type=1): the new
+ * thread's baseline is max(average of the parent's fair children's
+ * penalties, the parent's own penalty). RCU-side: the sibling list is
+ * maintained RCU under BORE (see kernel/fork.c), and the walks are capped.
+ */
+static u32 inherit_from_parent(struct task_struct *parent, u64 clone_flags)
+{
+	struct task_struct *child;
+	u32 count = 0, total = 0, scan = 0;
+
+	if (clone_flags & CLONE_PARENT)
+		parent = rcu_dereference(parent->real_parent);
+
+	for_each_child_task(parent, child) {
+		if (count >= BURST_INHERIT_SCAN_LIMIT)
+			break;
+		if (scan++ >= BURST_INHERIT_SCAN_LIMIT)
+			break;
+		if (!task_is_bore_eligible(child))
+			continue;
+		count++;
+		total += child->se.burst_penalty;
+	}
+
+	if (!count)
+		return parent->se.burst_penalty;
+	return max(total / count, parent->se.burst_penalty);
+}
+
+/*
+ * 7.0.0 sched_burst_inherit_type=2: follow the single-lineage chain up to
+ * the ancestor hub (deepest ancestor with more than one child), then
+ * inherit from there as in inherit_from_parent().
+ */
+static u32 inherit_from_ancestor_hub(struct task_struct *parent,
+				     u64 clone_flags)
+{
+	struct task_struct *next, *ancestor = parent;
+	u32 sole_child_count = 0;
+
+	if (clone_flags & CLONE_PARENT) {
+		ancestor = rcu_dereference(ancestor->real_parent);
+		sole_child_count = 1;
+	}
+
+	while ((next = rcu_dereference(ancestor->real_parent)) != ancestor &&
+	       count_children_upto2(ancestor) <= sole_child_count) {
+		ancestor = next;
+		sole_child_count = 1;
+	}
+
+	return inherit_from_parent(ancestor, 0);
+}
+
+/*
+ * 7.0.0 CLONE_THREAD: inherit the thread-group baseline: max(average of
+ * the sibling threads' penalties, the leader's own penalty).
+ */
+static u32 inherit_from_thread_group(struct task_struct *p,
+				     struct task_struct *leader)
+{
+	struct task_struct *sibling;
+	u32 count = 0, total = 0, scan = 0;
+
+	for_each_thread(leader, sibling) {
+		if (count >= BURST_INHERIT_SCAN_LIMIT)
+			break;
+		if (scan++ >= BURST_INHERIT_SCAN_LIMIT)
+			break;
+		if (!task_is_bore_eligible(sibling))
+			continue;
+		count++;
+		total += sibling->se.burst_penalty;
+	}
+
+	if (!count)
+		return leader->se.burst_penalty;
+	return max(total / count, leader->se.burst_penalty);
+}
+
+void task_fork_bore(struct task_struct *p, struct task_struct *parent,
+		    u64 clone_flags, u64 now)
+{
+	struct sched_entity *se = &p->se;
+
+	/*
+	 * fork memcpy'd the task_struct: reset the KABI-slot BORE state
+	 * for the fresh task.
+	 */
+	se->burst_time = 0;
+	se->prev_burst_penalty = 0;
+	se->curr_burst_penalty = 0;
+	se->burst_penalty = 0;
+	se->burst_score = 0;
+	se->credit_sleep = 0;
+	se->futex_waiting = false;
+	se->stop_bore_update = false;
+
+	if (!static_branch_likely(&sched_bore_key) || !task_is_bore_eligible(p))
+		return;
+
+	rcu_read_lock();
+	if (clone_flags & CLONE_THREAD) {
+		struct task_struct *leader = p->group_leader;
+
+		se->prev_burst_penalty =
+			inherit_from_thread_group(p, leader);
+	} else if (static_branch_likely(&sched_burst_inherit_key)) {
+		u32 inherited = static_branch_likely(
+			&sched_burst_ancestor_key) ?
+			inherit_from_ancestor_hub(parent, clone_flags) :
+			inherit_from_parent(parent, clone_flags);
+
+		se->prev_burst_penalty = inherited;
+	}
+	apply_burst_penalty(se, p);
+	rcu_read_unlock();
+}
+
+void reset_task_bore(struct task_struct *p)
+{
+	p->se.burst_time = 0;
+	p->se.prev_burst_penalty = 0;
+	p->se.curr_burst_penalty = 0;
+	p->se.burst_penalty = 0;
+	p->se.burst_score = 0;
+	p->se.credit_sleep = 0;
+	p->se.futex_waiting = false;
+	p->se.stop_bore_update = false;
+}
+
+void __init sched_init_bore(void)
+{
+	reset_task_bore(&init_task);
+
+	/* sched_burst_inherit_type starts at 2: sync the inherit keys. */
+	update_inherit_type();
+
+	/*
+	 * 7.0.0 sleep credit: on by default (sched_credit_cap_us != 0),
+	 * mirroring the static-key init path.
+	 */
+	if (sched_credit_cap_us)
+		static_branch_enable(&sched_credit_key);
+}
+
+/*
+ * Re-derive every fair task's weight from its current effective prio.
+ * Follows normalize_rt_tasks(): per-thread (not just group leaders), and
+ * task_rq_lock() so the rq cannot change under us. update_rq_clock() is
+ * required because reweight_entity() -> update_curr() reads rq_clock_task().
+ */
+static void reset_task_weights_bore(void)
+{
+	struct task_struct *g, *p;
+	struct rq_flags rf;
+	struct rq *rq;
+
+	read_lock(&tasklist_lock);
+	for_each_process_thread(g, p) {
+		if (p->sched_class != &fair_sched_class)
+			continue;
+
+		rq = task_rq_lock(p, &rf);
+		update_rq_clock(rq);
+		reweight_task_by_prio(p, effective_prio_bore(p));
+		task_rq_unlock(rq, p, &rf);
+	}
+	read_unlock(&tasklist_lock);
+}
+
+int sched_bore_update_handler(struct ctl_table *table, int write,
+		void *buffer, size_t *lenp, loff_t *ppos)
+{
+	int ret = proc_dou8vec_minmax(table, write, buffer, lenp, ppos);
+
+	if (ret || !write)
+		return ret;
+
+	if (sched_bore)
+		static_branch_enable(&sched_bore_key);
+	else
+		static_branch_disable(&sched_bore_key);
+
+	reset_task_weights_bore();
+
+	return 0;
+}
+
+static void update_inherit_type(void)
+{
+	switch (sched_burst_inherit_type) {
+	case 1:
+		static_branch_enable(&sched_burst_inherit_key);
+		static_branch_disable(&sched_burst_ancestor_key);
+		break;
+	case 2:
+		static_branch_enable(&sched_burst_inherit_key);
+		static_branch_enable(&sched_burst_ancestor_key);
+		break;
+	default:
+		static_branch_disable(&sched_burst_inherit_key);
+		break;
+	}
+}
+
+int sched_burst_inherit_type_update_handler(struct ctl_table *table,
+		int write, void *buffer, size_t *lenp, loff_t *ppos)
+{
+	int ret = proc_dou8vec_minmax(table, write, buffer, lenp, ppos);
+
+	if (ret || !write)
+		return ret;
+
+	update_inherit_type();
+
+	return 0;
+}
+
+int sched_burst_protect_slice_lv_update_handler(struct ctl_table *table,
+		int write, void *buffer, size_t *lenp, loff_t *ppos)
+{
+	int ret = proc_dou8vec_minmax(table, write, buffer, lenp, ppos);
+
+	if (ret || !write)
+		return ret;
+
+	if (sched_burst_protect_slice_lv == 1 ||
+	    sched_burst_protect_slice_lv == 2)
+		static_branch_enable(&sched_burst_protect_slice_cond_key);
+	else
+		static_branch_disable(&sched_burst_protect_slice_cond_key);
+
+	if (sched_burst_protect_slice_lv >= 2)
+		static_branch_enable(&sched_burst_protect_slice_prefer_key);
+	else
+		static_branch_disable(&sched_burst_protect_slice_prefer_key);
+
+	return 0;
+}
+
+int sched_credit_cap_us_update_handler(struct ctl_table *table,
+		int write, void *buffer, size_t *lenp, loff_t *ppos)
+{
+	int ret = proc_douintvec_minmax(table, write, buffer, lenp, ppos);
+
+	if (ret || !write)
+		return ret;
+
+	if (sched_credit_cap_us)
+		static_branch_enable(&sched_credit_key);
+	else
+		static_branch_disable(&sched_credit_key);
+
+	return 0;
+}
+
+#ifdef CONFIG_SYSCTL
+static int __maybe_unused three		= 3;
+static int __maybe_unused sixty_four	= 64;
+static int __maybe_unused maxval_12_bits	= 4095;
+static int __maybe_unused maxval_1_million = 1000000;
+
+/* Same /proc/sys/kernel/sched_bore* nodes as on 5.10 (kernel/sysctl.c there). */
+static struct ctl_table sched_bore_sysctls[] = {
+	{
+		.procname	= "sched_bore",
+		.data		= &sched_bore,
+		.maxlen		= sizeof(u8),
+		.mode		= 0644,
+		.proc_handler = sched_bore_update_handler,
+		.extra1		= SYSCTL_ZERO,
+		.extra2		= SYSCTL_ONE,
+	},
+	{
+		/* 7.0.0 fork-time burst inheritance: 0 = off,
+		 * 1 = direct parent, 2 = ancestor-hub lineage. */
+		.procname	= "sched_burst_inherit_type",
+		.data		= &sched_burst_inherit_type,
+		.maxlen		= sizeof(u8),
+		.mode		= 0644,
+		.proc_handler = sched_burst_inherit_type_update_handler,
+		.extra1		= SYSCTL_ZERO,
+		.extra2		= SYSCTL_TWO,
+	},
+	{
+		/* 7.0.0: 0-3, 3 is the strongest decay smoothing. */
+		.procname	= "sched_burst_smoothness",
+		.data		= &sched_burst_smoothness,
+		.maxlen		= sizeof(u8),
+		.mode		= 0644,
+		.proc_handler = proc_dou8vec_minmax,
+		.extra1		= SYSCTL_ZERO,
+		.extra2		= &three,
+	},
+	{
+		.procname	= "sched_burst_penalty_offset",
+		.data		= &sched_burst_penalty_offset,
+		.maxlen		= sizeof(u8),
+		.mode		= 0644,
+		.proc_handler = proc_dou8vec_minmax,
+		.extra1		= SYSCTL_ZERO,
+		.extra2		= &sixty_four,
+	},
+	{
+		.procname	= "sched_burst_penalty_scale",
+		.data		= &sched_burst_penalty_scale,
+		.maxlen		= sizeof(uint),
+		.mode		= 0644,
+		.proc_handler = proc_douintvec_minmax,
+		.extra1		= SYSCTL_ZERO,
+		.extra2		= &maxval_12_bits,
+	},
+	{
+		/*
+		 * BORE 7.0.0: retained for the cached-inheritance path.
+		 * This tree's live-penalty inheritance does not read it,
+		 * so it is inert and kept for user-space compatibility.
+		 */
+		.procname	= "sched_burst_cache_lifetime",
+		.data		= &sched_burst_cache_lifetime,
+		.maxlen		= sizeof(uint),
+		.mode		= 0644,
+		.proc_handler = proc_douintvec,
+	},
+	{
+		/* 7.0.0: 0 off, 1 conditional slice protection,
+		 * 2 + prefer-heavier on ties. */
+		.procname	= "sched_burst_protect_slice_lv",
+		.data		= &sched_burst_protect_slice_lv,
+		.maxlen		= sizeof(u8),
+		.mode		= 0644,
+		.proc_handler = sched_burst_protect_slice_lv_update_handler,
+		.extra1		= SYSCTL_ZERO,
+		.extra2		= &three,
+	},
+	{
+		/* 7.0.0: wakeup sleep-credit cap in microseconds (0 = off). */
+		.procname	= "sched_credit_cap_us",
+		.data		= &sched_credit_cap_us,
+		.maxlen		= sizeof(uint),
+		.mode		= 0644,
+		.proc_handler = sched_credit_cap_us_update_handler,
+		.extra1		= SYSCTL_ZERO,
+		.extra2		= &maxval_1_million,
+	},
+	{}
+};
+
+static int __init sched_bore_sysctl_init(void)
+{
+	register_sysctl_init("kernel", sched_bore_sysctls);
+	return 0;
+}
+late_initcall(sched_bore_sysctl_init);
+#endif /* CONFIG_SYSCTL */
+#endif /* CONFIG_SCHED_BORE */
+
+#ifdef CONFIG_SCHED_BORE
+/*
+ * BORE 7.0.0 protect_slice_lv: a wakee that is heavier than current
+ * (under BORE: more interactive) overrides current's slice protection
+ * and preempts it. lv 1 (cond): strictly heavier; lv 2 (prefer): equal
+ * weight wins too.
+ */
+static inline bool do_preempt_weight(struct cfs_rq *cfs_rq,
+				     struct sched_entity *pse,
+				     struct sched_entity *se)
+{
+	if (!static_branch_likely(&sched_bore_key))
+		return false;
+
+	if (!static_branch_likely(&sched_burst_protect_slice_cond_key))
+		return false;
+
+	if (static_branch_unlikely(&sched_burst_protect_slice_prefer_key) ?
+	    (pse->load.weight <= se->load.weight) :
+	    (pse->load.weight <  se->load.weight))
+		return false;
+
+	if (!entity_eligible(cfs_rq, pse))
+		return false;
+
+	if (entity_before(pse, se))
+		return true;
+
+	if (!entity_eligible(cfs_rq, se))
+		return true;
+
+	return false;
+}
+#endif /* CONFIG_SCHED_BORE */
 
 static u64 __update_min_vruntime(struct cfs_rq *cfs_rq, u64 vruntime)
 {
@@ -941,8 +1603,22 @@ static struct sched_entity *pick_eevdf(struct cfs_rq *cfs_rq)
 	 * Once selected, run a task until it either becomes non-eligible or
 	 * until it gets a new slice. See the HACK in set_next_entity().
 	 */
-	if (sched_feat(RUN_TO_PARITY) && curr && curr->vlag == curr->deadline)
-		return curr;
+	if (sched_feat(RUN_TO_PARITY) && curr && curr->vlag == curr->deadline) {
+#ifdef CONFIG_SCHED_BORE
+		/*
+		 * BORE 7.0.0 (protect_slice_lv): a futex waiter does not
+		 * keep its slice on parity -- its deadline already bounds
+		 * the whole waiter chain, auto-continuing it would hold
+		 * the CPU against lighter wakeups.
+		 */
+		if (static_branch_likely(&sched_bore_key) &&
+		    static_branch_likely(&sched_burst_protect_slice_cond_key) &&
+		    entity_is_task(curr) && curr->futex_waiting)
+			; /* fall through to the tree walk */
+		else
+#endif /* CONFIG_SCHED_BORE */
+			return curr;
+	}
 
 	/* Pick the leftmost entity if it's eligible */
 	if (se && entity_eligible(cfs_rq, se)) {
@@ -1204,6 +1880,9 @@ static void update_curr(struct cfs_rq *cfs_rq)
 	if (entity_is_task(curr)) {
 		struct task_struct *curtask = task_of(curr);
 
+#ifdef CONFIG_SCHED_BORE
+		update_curr_bore(curtask, delta_exec);
+#endif /* CONFIG_SCHED_BORE */
 		trace_sched_stat_runtime(curtask, delta_exec, curr->vruntime);
 		cgroup_account_cputime(curtask, delta_exec);
 		account_group_exec_runtime(curtask, delta_exec);
@@ -5298,11 +5977,37 @@ place_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
 	 */
 	if (sched_feat(PLACE_DEADLINE_INITIAL) && (flags & ENQUEUE_INITIAL))
 		vslice /= 2;
+#ifdef CONFIG_SCHED_BORE
+	/*
+	 * BORE: wakeups also enter with half a slice, except futex waiters
+	 * which keep the full window -- their deadline bounds the wakeup
+	 * latency of the whole waiter chain (binder, GPU fences).
+	 */
+	else if (static_branch_likely(&sched_bore_key) &&
+		 !(entity_is_task(se) && se->futex_waiting))
+		vslice /= 2;
+#endif /* CONFIG_SCHED_BORE */
 
 	/*
 	 * EEVDF: vd_i = ve_i + r_i/w_i
 	 */
 	se->deadline = se->vruntime + vslice;
+
+#ifdef CONFIG_SCHED_BORE
+	/*
+	 * BORE 7.0.0 sleep credit: shorten the deadline of a freshly
+	 * woken task by its capped sleep time (see bore_credit_ns()).
+	 * Wakeup-only: the initial path sleeps nothing.
+	 */
+	if (static_branch_likely(&sched_bore_key) &&
+	    static_branch_unlikely(&sched_credit_key) &&
+	    entity_is_task(se) && !(flags & ENQUEUE_INITIAL)) {
+		u64 credit = bore_credit_ns(task_of(se));
+
+		if (credit && se->deadline > credit)
+			se->deadline -= credit;
+	}
+#endif /* CONFIG_SCHED_BORE */
 	trace_android_rvh_place_entity(cfs_rq, se, flags, &vruntime);
 }
 
@@ -6881,6 +7586,16 @@ static void dequeue_task_fair(struct rq *rq, struct task_struct *p, int flags)
 	bool was_sched_idle = sched_idle_rq(rq);
 
 	util_est_dequeue(&rq->cfs, p);
+#ifdef CONFIG_SCHED_BORE
+	if (task_sleep) {
+		cfs_rq = cfs_rq_of(se);
+		if (cfs_rq->curr == se)
+			update_curr(cfs_rq);
+		/* 7.0.0: stamp the sleep time for the wakeup credit. */
+		bore_note_sleep(p, rq_clock(rq));
+		restart_burst_bore(p);
+	}
+#endif /* CONFIG_SCHED_BORE */
 
 	for_each_sched_entity(se) {
 		cfs_rq = cfs_rq_of(se);
@@ -7527,16 +8242,26 @@ static int select_idle_cpu(struct task_struct *p, struct sched_domain *sd, bool 
 }
 
 /*
+ * Supply little-core bias when EAS is absent (no energy model registered).
+ */
+static inline bool sched_prefer_small_cpu(struct task_struct *p)
+{
+	return !sched_energy_enabled();
+}
+
+/*
  * Scan the asym_capacity domain for idle CPUs; pick the first idle one on which
- * the task fits. If no CPU is big enough, but there are idle ones, try to
- * maximize capacity.
+ * the task fits - or, when we are standing in for EAS, the smallest such one.
+ * If no CPU is big enough, but there are idle ones, try to maximize capacity.
  */
 static int
 select_idle_capacity(struct task_struct *p, struct sched_domain *sd, int target)
 {
 	unsigned long task_util, util_min, util_max, best_cap = 0;
+	unsigned long fit_cap = ULONG_MAX;
+	bool prefer_small = sched_prefer_small_cpu(p);
 	int fits, best_fits = 0;
-	int cpu, best_cpu = -1;
+	int cpu, best_cpu = -1, fit_cpu = -1;
 	struct cpumask *cpus;
 
 	cpus = this_cpu_cpumask_var_ptr(select_rq_mask);
@@ -7546,7 +8271,7 @@ select_idle_capacity(struct task_struct *p, struct sched_domain *sd, int target)
 	util_min = uclamp_eff_value(p, UCLAMP_MIN);
 	util_max = uclamp_eff_value(p, UCLAMP_MAX);
 
-	for_each_cpu_wrap(cpu, cpus, target) {
+	for_each_cpu_wrap(cpu, cpus, target + 1) {
 		unsigned long cpu_cap = capacity_of(cpu);
 
 		if (!available_idle_cpu(cpu) && !sched_idle_cpu(cpu))
@@ -7555,8 +8280,21 @@ select_idle_capacity(struct task_struct *p, struct sched_domain *sd, int target)
 		fits = util_fits_cpu(task_util, util_min, util_max, cpu);
 
 		/* This CPU fits with all requirements */
-		if (fits > 0)
-			return cpu;
+		if (fits > 0) {
+			if (!prefer_small)
+				return cpu;
+			/*
+			 * Keep looking for a smaller CPU that also fits. A tie
+			 * keeps the CPU found first and the scan starts at
+			 * @target, so cache affinity still wins inside a
+			 * cluster - only a genuinely oversized CPU is given up.
+			 */
+			if (cpu_cap < fit_cap) {
+				fit_cap = cpu_cap;
+				fit_cpu = cpu;
+			}
+			continue;
+		}
 		/*
 		 * Only the min performance hint (i.e. uclamp_min) doesn't fit.
 		 * Look for the CPU with best capacity.
@@ -7576,7 +8314,7 @@ select_idle_capacity(struct task_struct *p, struct sched_domain *sd, int target)
 		}
 	}
 
-	return best_cpu;
+	return fit_cpu >= 0 ? fit_cpu : best_cpu;
 }
 
 static inline bool asym_fits_cpu(unsigned long util,
@@ -8438,10 +9176,29 @@ static void check_preempt_wakeup(struct rq *rq, struct task_struct *p, int wake_
 	if (ignore)
 		return;
 
+#ifdef CONFIG_SCHED_BORE
+	/*
+	 * BORE 7.0.0 protect_slice_lv: a heavier wakee overrides current's
+	 * slice protection.
+	 */
+	if (do_preempt_weight(cfs_rq, pse, se))
+		goto preempt;
+#endif /* CONFIG_SCHED_BORE */
+
 	/*
 	 * XXX pick_eevdf(cfs_rq) != se ?
+	 *
+	 * The wakee preempts only when its deadline advantage over the current
+	 * entity also exceeds one wakeup granularity (virtual, of the wakee).
+	 * Without the guard two interacting tasks with near-equal vruntimes
+	 * preempt each other on every wakeup -- a ping-pong that keeps light
+	 * pairs (binder, RenderThread) from settling and raises screen-off
+	 * power. Later upstream EEVDF gets the same from protect_slice /
+	 * DELAY_DEQUEUE, which 6.6 does not have.
 	 */
-	if (pick_eevdf(cfs_rq) == pse)
+	if (pick_eevdf(cfs_rq) == pse &&
+	    (s64)(se->deadline - pse->deadline) >
+	    (s64)calc_delta_fair(sched_wakeup_granularity, pse))
 		goto preempt;
 
 	return;
@@ -8665,6 +9422,7 @@ static void yield_task_fair(struct rq *rq)
 	struct cfs_rq *cfs_rq = task_cfs_rq(curr);
 	struct sched_entity *se = &curr->se;
 
+#ifndef CONFIG_SCHED_BORE
 	/*
 	 * Are we the only task in the tree?
 	 */
@@ -8672,12 +9430,21 @@ static void yield_task_fair(struct rq *rq)
 		return;
 
 	clear_buddies(cfs_rq, se);
+#endif /* !CONFIG_SCHED_BORE */
 
 	update_rq_clock(rq);
 	/*
 	 * Update run-time statistics of the 'current'.
 	 */
 	update_curr(cfs_rq);
+#ifdef CONFIG_SCHED_BORE
+	/* A yield ends the burst; the lone-task exit runs after it. */
+	restart_burst_rescale_deadline_bore(curr);
+	if (unlikely(rq->nr_running == 1))
+		return;
+
+	clear_buddies(cfs_rq, se);
+#endif /* CONFIG_SCHED_BORE */
 	/*
 	 * Tell update_rq_clock() that we've just updated,
 	 * so we don't do microscopic update in schedule()
@@ -12941,6 +13708,13 @@ static void switched_from_fair(struct rq *rq, struct task_struct *p)
 static void switched_to_fair(struct rq *rq, struct task_struct *p)
 {
 	attach_task_cfs_rq(p);
+#ifdef CONFIG_SCHED_BORE
+	/*
+	 * Switched out of another class: reset the BORE state the memcpy
+	 * of a switched-in task may carry (upstream 7.0.0 reset_task_bore).
+	 */
+	reset_task_bore(p);
+#endif /* CONFIG_SCHED_BORE */
 
 	if (task_on_rq_queued(p)) {
 		/*

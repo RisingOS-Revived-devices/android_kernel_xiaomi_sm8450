@@ -12,13 +12,14 @@
 
 static int neg_five = -5;
 static int three = 3;
-static int four = 4;
+static int __maybe_unused four = 4;
 static int five = 5;
 static int two_hundred_fifty_five = 255;
 static unsigned int ns_per_sec = NSEC_PER_SEC;
 static unsigned int one_hundred_thousand = 100000;
 static unsigned int two_hundred_million = 200000000;
 static int __maybe_unused two = 2;
+static int __maybe_unused six = 6;
 static int one_hundred = 100;
 static int one_thousand = 1000;
 static int one_thousand_twenty_four = 1024;
@@ -51,6 +52,9 @@ unsigned int sysctl_sched_wake_up_idle[2];
 unsigned int sysctl_input_boost_ms;
 unsigned int sysctl_input_boost_freq[WALT_NR_CPUS];
 unsigned int sysctl_sched_boost_on_input;
+unsigned int sysctl_powerkey_input_boost_ms;
+unsigned int sysctl_powerkey_input_boost_freq[WALT_NR_CPUS];
+unsigned int sysctl_powerkey_sched_boost_on_input;
 unsigned int sysctl_sched_early_up[MAX_MARGIN_LEVELS];
 unsigned int sysctl_sched_early_down[MAX_MARGIN_LEVELS];
 
@@ -1345,6 +1349,33 @@ static struct ctl_table input_boost_sysctls[] = {
 		.extra1		= SYSCTL_ZERO,
 		.extra2		= SYSCTL_INT_MAX,
 	},
+	{
+		.procname	= "powerkey_input_boost_ms",
+		.data		= &sysctl_powerkey_input_boost_ms,
+		.maxlen		= sizeof(unsigned int),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec_minmax,
+		.extra1		= SYSCTL_ZERO,
+		.extra2		= &one_hundred_thousand,
+	},
+	{
+		.procname	= "powerkey_input_boost_freq",
+		.data		= &sysctl_powerkey_input_boost_freq,
+		.maxlen		= sizeof(unsigned int) * 8,
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec_minmax,
+		.extra1		= SYSCTL_ZERO,
+		.extra2		= SYSCTL_INT_MAX,
+	},
+	{
+		.procname	= "powerkey_sched_boost_on_input",
+		.data		= &sysctl_powerkey_sched_boost_on_input,
+		.maxlen		= sizeof(unsigned int),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec_minmax,
+		.extra1		= SYSCTL_ZERO,
+		.extra2		= SYSCTL_INT_MAX,
+	},
 };
 
 static struct ctl_table walt_table[] = {
@@ -1364,7 +1395,7 @@ static struct ctl_table walt_table[] = {
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec_minmax,
 		.extra1		= SYSCTL_ZERO,
-		.extra2		= &four,
+		.extra2		= &six,
 	},
 	{
 		.procname	= "sched_group_upmigrate",

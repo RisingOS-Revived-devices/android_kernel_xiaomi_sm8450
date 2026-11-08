@@ -1618,7 +1618,7 @@ static ssize_t min_freq_show(struct device *dev, struct device_attribute *attr,
 }
 static DEVICE_ATTR_RW(min_freq);
 
-static ssize_t max_freq_store(struct device *dev, struct device_attribute *attr,
+static ssize_t __maybe_unused max_freq_store(struct device *dev, struct device_attribute *attr,
 			      const char *buf, size_t count)
 {
 	struct devfreq *df = to_devfreq(dev);
@@ -1670,7 +1670,7 @@ static ssize_t max_freq_show(struct device *dev, struct device_attribute *attr,
 
 	return sprintf(buf, "%lu\n", max_freq);
 }
-static DEVICE_ATTR_RW(max_freq);
+static DEVICE_ATTR_RO(max_freq);
 
 static ssize_t available_frequencies_show(struct device *d,
 					  struct device_attribute *attr,
@@ -2033,7 +2033,8 @@ static int __init devfreq_init(void)
 		return PTR_ERR(devfreq_class);
 	}
 
-	devfreq_wq = create_freezable_workqueue("devfreq_wq");
+	devfreq_wq = alloc_workqueue("devfreq_wq", WQ_HIGHPRI | WQ_FREEZABLE |
+				     WQ_UNBOUND | WQ_MEM_RECLAIM, 1);
 	if (!devfreq_wq) {
 		class_destroy(devfreq_class);
 		pr_err("%s: couldn't create workqueue\n", __FILE__);
