@@ -258,6 +258,6 @@ struct netns_ipv4 {
 	atomic_t	rt_genid;
 	siphash_key_t	ip_id_key;
 
-	ANDROID_KABI_RESERVE(1);
+	ANDROID_KABI_USE(1, unsigned long *sysctl_local_unbindable_ports);
 };
 #endif
