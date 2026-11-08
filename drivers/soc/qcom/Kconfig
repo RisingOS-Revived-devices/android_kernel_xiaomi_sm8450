@@ -1255,6 +1255,15 @@ config QTI_GPLAF_SCMI_CLIENT
 	  driver, and interface driver will use this handle to communicate
 	  with CPUCP GPLAF.
 
+config QCOM_HYP_CORE_CTL
+	tristate "CPU reservation scheme for Hypervisor"
+	depends on GH_RM_DRV && SCHED_WALT && QTI_CPU_PAUSE_COOLING_DEVICE
+	help
+	  This driver reserve the specified CPUS by isolating them. The reserved
+	  CPUs can be assigned to the other guest OS by the hypervisor.
+	  An offline CPU is considered as a reserved CPU since this OS can't use
+	  it.
+
 config SHOW_SUSPEND_EPOCH
         tristate "Show epoch values in suspend resume cycles"
         depends on ARCH_QCOM
