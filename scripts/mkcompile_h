@@ -16,8 +16,12 @@ else
 	LINUX_COMPILE_HOST=$KBUILD_BUILD_HOST
 fi
 
+# Drop "(https://...)" source URLs and repeated blanks from the version strings
+CC_VERSION=$(echo "$CC_VERSION" |
+		sed -e 's/(http[^)]*)//g' -e 's/  */ /g' -e 's/[[:space:]]*$//')
 LD_VERSION=$(LC_ALL=C $LD -v | head -n1 |
-		sed -e 's/(compatible with [^)]*)//' -e 's/[[:space:]]*$//')
+		sed -e 's/(compatible with [^)]*)//' -e 's/(http[^)]*)//g' \
+		    -e 's/  */ /g' -e 's/[[:space:]]*$//')
 
 cat <<EOF
 #define UTS_MACHINE		"${UTS_MACHINE}"
