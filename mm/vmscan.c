@@ -3485,7 +3485,7 @@ static int get_swappiness(struct lruvec *lruvec, struct scan_control *sc)
 		return 0;
 
 	if (!can_demote(pgdat->node_id, sc) &&
-	    mem_cgroup_get_nr_swap_pages(memcg) < MIN_LRU_BATCH)
+	    mem_cgroup_get_nr_swap_pages(memcg) <= 0)
 		return 0;
 
 	swappiness = sc_swappiness(sc, memcg);
@@ -8258,6 +8258,7 @@ void __meminit kswapd_run(int nid)
 	pg_data_t *pgdat = NODE_DATA(nid);
 
 	pgdat_kswapd_lock(pgdat);
+	kcompressd_run(nid);
 	if (!pgdat->kswapd) {
 		pgdat->kswapd = kthread_run(kswapd, pgdat, "kswapd%d", nid);
 		if (IS_ERR(pgdat->kswapd)) {
@@ -8285,6 +8286,7 @@ void __meminit kswapd_stop(int nid)
 		kthread_stop(kswapd);
 		pgdat->kswapd = NULL;
 	}
+	kcompressd_stop(nid);
 	pgdat_kswapd_unlock(pgdat);
 }
 

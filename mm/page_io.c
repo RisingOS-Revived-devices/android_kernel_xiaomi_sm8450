@@ -25,6 +25,8 @@
 #include <linux/sched/task.h>
 #include <linux/delayacct.h>
 #include <linux/zswap.h>
+#include <linux/kfifo.h>
+#include <linux/kthread.h>
 #include "swap.h"
 
 #undef CREATE_TRACE_POINTS
@@ -179,6 +181,43 @@ bad_bmap:
  * We may have stale swap cache pages in memory: notice
  * them here and get rid of the unnecessary final write.
  */
+#define KCOMPRESS_FIFO_SIZE 256
+
+struct kcompress_t {
+	wait_queue_head_t kcompressd_wait;
+	struct task_struct *kcompressd;
+	struct kfifo kcompress_fifo;
+};
+
+/* Kept out of struct pglist_data so the KMI layout does not change */
+static struct kcompress_t kcompress_data[MAX_NUMNODES];
+
+static bool swap_sched_async_compress(struct folio *folio)
+{
+	struct kcompress_t *kc = &kcompress_data[numa_node_id()];
+	struct swap_info_struct *sis;
+
+	if (unlikely(!smp_load_acquire(&kc->kcompressd)))
+		return false;
+
+	if (!current_is_kswapd())
+		return false;
+
+	if (!folio_test_anon(folio))
+		return false;
+
+	sis = page_swap_info(&folio->page);
+	if (data_race(sis->flags & __SWP_WRITE_SYNCHRONOUS_IO)) {
+		if (kfifo_avail(&kc->kcompress_fifo) >= sizeof(folio) &&
+		    kfifo_in(&kc->kcompress_fifo, &folio, sizeof(folio))) {
+			wake_up_interruptible(&kc->kcompressd_wait);
+			return true;
+		}
+	}
+
+	return false;
+}
+
 int swap_writepage(struct page *page, struct writeback_control *wbc)
 {
 	struct folio *folio = page_folio(page);
@@ -204,8 +243,105 @@ int swap_writepage(struct page *page, struct writeback_control *wbc)
 		folio_end_writeback(folio);
 		return 0;
 	}
+
+	/*
+	 * Compression within zswap and zram might block rmap, unmap
+	 * of both file and anon pages, try to do compression async
+	 * if possible
+	 */
+	if (swap_sched_async_compress(folio))
+		return 0;
+
 	__swap_writepage(&folio->page, wbc);
 	return 0;
+}
+
+static int kcompressd(void *p)
+{
+	pg_data_t *pgdat = (pg_data_t *)p;
+	struct kcompress_t *kc = &kcompress_data[pgdat->node_id];
+	struct folio *folio;
+	struct writeback_control wbc = {
+		.sync_mode = WB_SYNC_NONE,
+		.nr_to_write = SWAP_CLUSTER_MAX,
+		.range_start = 0,
+		.range_end = LLONG_MAX,
+		.for_reclaim = 1,
+	};
+
+	/*
+	 * Tell the memory management that we're a "memory allocator",
+	 * and that if we need more memory we should get access to it
+	 * regardless (see "__alloc_pages()"). "kswapd" should
+	 * never get caught in the normal page freeing logic.
+	 *
+	 * (Kswapd normally doesn't need memory anyway, but sometimes
+	 * you need a small amount of memory in order to be able to
+	 * page out something else, and this flag essentially protects
+	 * us from recursively trying to free more memory as we're
+	 * trying to free the first piece of memory in the first place).
+	 */
+	current->flags |= PF_MEMALLOC | PF_KSWAPD;
+
+	while (!kthread_should_stop()) {
+		/* Also wake up for kthread_stop(), or kswapd_stop() hangs */
+		wait_event_interruptible(kc->kcompressd_wait,
+				!kfifo_is_empty(&kc->kcompress_fifo) ||
+				kthread_should_stop());
+
+		while (!kfifo_is_empty(&kc->kcompress_fifo)) {
+			if (kfifo_out(&kc->kcompress_fifo, &folio, sizeof(folio)))
+				__swap_writepage(&folio->page, &wbc);
+		}
+	}
+	current->flags &= ~(PF_MEMALLOC | PF_KSWAPD);
+
+	return 0;
+}
+
+/* Called with the pgdat kswapd lock held, before kswapd is started. */
+void kcompressd_run(int nid)
+{
+	struct kcompress_t *kc = &kcompress_data[nid];
+	struct task_struct *tsk;
+
+	if (kc->kcompressd)
+		return;
+
+	init_waitqueue_head(&kc->kcompressd_wait);
+	if (kfifo_alloc(&kc->kcompress_fifo,
+			KCOMPRESS_FIFO_SIZE * sizeof(struct folio *),
+			GFP_KERNEL)) {
+		pr_err("%s: fail to kfifo_alloc\n", __func__);
+		return;
+	}
+
+	tsk = kthread_create_on_node(kcompressd, NODE_DATA(nid), nid,
+				     "kcompressd%d", nid);
+	if (IS_ERR(tsk)) {
+		pr_err("Failed to start kcompressd on node %d, ret=%ld\n",
+		       nid, PTR_ERR(tsk));
+		kfifo_free(&kc->kcompress_fifo);
+		return;
+	}
+
+	/* Publish the thread only after the fifo is ready for producers */
+	smp_store_release(&kc->kcompressd, tsk);
+	wake_up_process(tsk);
+}
+
+/* Called with the pgdat kswapd lock held, after kswapd has stopped. */
+void kcompressd_stop(int nid)
+{
+	struct kcompress_t *kc = &kcompress_data[nid];
+	struct task_struct *tsk = kc->kcompressd;
+
+	if (!tsk)
+		return;
+
+	kthread_stop(tsk);
+	WRITE_ONCE(kc->kcompressd, NULL);
+	kfifo_free(&kc->kcompress_fifo);
 }
 
 static inline void count_swpout_vm_event(struct folio *folio)

@@ -359,10 +359,10 @@ const char * const migratetype_names[MIGRATE_TYPES] = {
 
 unsigned long nr_free_highatomic[MAX_NR_ZONES] = {0};
 
-int min_free_kbytes = 1024;
+int min_free_kbytes = 32768;
 int user_min_free_kbytes = -1;
 static int watermark_boost_factor __read_mostly = 15000;
-static int watermark_scale_factor = 10;
+static int watermark_scale_factor = 25;
 
 /* virt_zone is the "real" zone pages in virtual zones are taken from */
 int virt_zone;
@@ -6459,7 +6459,7 @@ void calculate_min_free_kbytes(void)
 	new_min_free_kbytes = int_sqrt(lowmem_kbytes * 16);
 
 	if (new_min_free_kbytes > user_min_free_kbytes)
-		min_free_kbytes = clamp(new_min_free_kbytes, 128, 262144);
+		min_free_kbytes = clamp(new_min_free_kbytes, 32768, 262144);
 	else
 		pr_warn("min_free_kbytes is not updated to %d because user defined value %d is preferred\n",
 				new_min_free_kbytes, user_min_free_kbytes);
