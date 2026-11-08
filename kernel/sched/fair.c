@@ -78,7 +78,7 @@ EXPORT_TRACEPOINT_SYMBOL_GPL(sched_stat_runtime);
  *
  * (default: 6ms * (1 + ilog(ncpus)), units: nanoseconds)
  */
-unsigned int sysctl_sched_latency			= 6000000ULL;
+unsigned int sysctl_sched_latency			= 16000000ULL;
 EXPORT_SYMBOL_GPL(sysctl_sched_latency);
 
 /*
@@ -91,17 +91,24 @@ EXPORT_SYMBOL_GPL(sysctl_sched_latency);
  *   SCHED_TUNABLESCALING_LINEAR - scaled linear, *ncpus
  *
  * (default SCHED_TUNABLESCALING_LOG = *(1+ilog(ncpus))
+ *
+ * NONE here: the latency/slice values below are chosen for this class of
+ * device already, the ncpus multiplier would only scale them again.
  */
-unsigned int sysctl_sched_tunable_scaling = SCHED_TUNABLESCALING_LOG;
+unsigned int sysctl_sched_tunable_scaling = SCHED_TUNABLESCALING_NONE;
 
 /*
  * Minimal preemption granularity for CPU-bound tasks:
  *
  * (default: 0.70 msec * (1 + ilog(ncpus)), units: nanoseconds)
+ *
+ * 2 ms unscaled (as on the 5.10 EEVDF backport): sets the EEVDF request
+ * size and with it the context-switch rate; 0.7 ms * 4 on 8 CPUs is costly
+ * on a little core where cache/TLB refill is a real part of the slice.
  */
-unsigned int sysctl_sched_base_slice			= 700000ULL;
+unsigned int sysctl_sched_base_slice			= 2000000ULL;
 EXPORT_SYMBOL_GPL(sysctl_sched_base_slice);
-static unsigned int normalized_sysctl_sched_base_slice	= 700000ULL;
+static unsigned int normalized_sysctl_sched_base_slice	= 2000000ULL;
 
 /*
  * After fork, child runs first. If set to 0 (default) then
