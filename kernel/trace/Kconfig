@@ -147,6 +147,11 @@ config PREEMPTIRQ_TRACEPOINTS
 	  Create preempt/irq toggle tracepoints if needed, so that other parts
 	  of the kernel can use them to generate or add hooks to them.
 
+menuconfig TRACEFS_DISABLE_AUTOMOUNT
+	bool "Do not autmount tracefs in the debugfs filesystem"
+	help
+	  Provides an option to not automount tracefs in /sys/kernel/debug/tracing.
+
 config IPC_LOGGING
 	tristate "Debug Logging for IPC Drivers"
 	select GENERIC_TRACER
