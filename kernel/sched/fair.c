@@ -8236,16 +8236,26 @@ static int select_idle_cpu(struct task_struct *p, struct sched_domain *sd, bool 
 }
 
 /*
+ * Supply little-core bias when EAS is absent (no energy model registered).
+ */
+static inline bool sched_prefer_small_cpu(struct task_struct *p)
+{
+	return !sched_energy_enabled();
+}
+
+/*
  * Scan the asym_capacity domain for idle CPUs; pick the first idle one on which
- * the task fits. If no CPU is big enough, but there are idle ones, try to
- * maximize capacity.
+ * the task fits - or, when we are standing in for EAS, the smallest such one.
+ * If no CPU is big enough, but there are idle ones, try to maximize capacity.
  */
 static int
 select_idle_capacity(struct task_struct *p, struct sched_domain *sd, int target)
 {
 	unsigned long task_util, util_min, util_max, best_cap = 0;
+	unsigned long fit_cap = ULONG_MAX;
+	bool prefer_small = sched_prefer_small_cpu(p);
 	int fits, best_fits = 0;
-	int cpu, best_cpu = -1;
+	int cpu, best_cpu = -1, fit_cpu = -1;
 	struct cpumask *cpus;
 
 	cpus = this_cpu_cpumask_var_ptr(select_rq_mask);
@@ -8264,8 +8274,21 @@ select_idle_capacity(struct task_struct *p, struct sched_domain *sd, int target)
 		fits = util_fits_cpu(task_util, util_min, util_max, cpu);
 
 		/* This CPU fits with all requirements */
-		if (fits > 0)
-			return cpu;
+		if (fits > 0) {
+			if (!prefer_small)
+				return cpu;
+			/*
+			 * Keep looking for a smaller CPU that also fits. A tie
+			 * keeps the CPU found first and the scan starts at
+			 * @target, so cache affinity still wins inside a
+			 * cluster - only a genuinely oversized CPU is given up.
+			 */
+			if (cpu_cap < fit_cap) {
+				fit_cap = cpu_cap;
+				fit_cpu = cpu;
+			}
+			continue;
+		}
 		/*
 		 * Only the min performance hint (i.e. uclamp_min) doesn't fit.
 		 * Look for the CPU with best capacity.
@@ -8285,7 +8308,7 @@ select_idle_capacity(struct task_struct *p, struct sched_domain *sd, int target)
 		}
 	}
 
-	return best_cpu;
+	return fit_cpu >= 0 ? fit_cpu : best_cpu;
 }
 
 static inline bool asym_fits_cpu(unsigned long util,
