@@ -984,6 +984,8 @@ endif
 
 # Limit inlining across translation units to reduce binary size
 KBUILD_LDFLAGS += -mllvm -import-instr-limit=5
+# Set O3 optimization level for LTO
+KBUILD_LDFLAGS		+= --plugin-opt=O3
 
 # Check for frame size exceeding threshold during prolog/epilog insertion
 # when using lld < 13.0.0.
