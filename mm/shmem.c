@@ -4874,6 +4874,21 @@ struct file *shmem_file_setup_with_mnt(struct vfsmount *mnt, const char *name,
 EXPORT_SYMBOL_GPL(shmem_file_setup_with_mnt);
 
 /**
+ * shmem_set_file - install an existing shmem file into a shared mapping
+ * @vma: the vma to be mmapped is prepared by do_mmap
+ * @file: the shmem file to back the mapping; the caller passes its reference
+ *
+ * Like shmem_zero_setup(), but reuses @file instead of creating a new one.
+ */
+void shmem_set_file(struct vm_area_struct *vma, struct file *file)
+{
+	if (vma->vm_file)
+		fput(vma->vm_file);
+	vma->vm_file = file;
+	vma->vm_ops = &shmem_anon_vm_ops;
+}
+
+/**
  * shmem_zero_setup - setup a shared anonymous mapping
  * @vma: the vma to be mmapped is prepared by do_mmap
  */
