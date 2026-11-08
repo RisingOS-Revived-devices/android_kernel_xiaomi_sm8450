@@ -229,6 +229,8 @@ static const struct dentry_operations dma_buf_dentry_ops = {
 
 static struct vfsmount *dma_buf_mnt;
 
+static struct kmem_cache *kmem_attach_pool;
+
 static int dma_buf_fs_init_context(struct fs_context *fc)
 {
 	struct pseudo_fs_context *ctx;
@@ -1624,7 +1626,7 @@ dma_buf_dynamic_attach(struct dma_buf *dmabuf, struct device *dev,
 	if (WARN_ON(importer_ops && !importer_ops->move_notify))
 		return ERR_PTR(-EINVAL);
 
-	attach = kzalloc(sizeof(*attach), GFP_KERNEL);
+	attach = kmem_cache_zalloc(kmem_attach_pool, GFP_KERNEL);
 	if (!attach)
 		return ERR_PTR(-ENOMEM);
 
@@ -1674,7 +1676,7 @@ dma_buf_dynamic_attach(struct dma_buf *dmabuf, struct device *dev,
 	return attach;
 
 err_attach:
-	kfree(attach);
+	kmem_cache_free(kmem_attach_pool, attach);
 	return ERR_PTR(ret);
 
 err_unpin:
@@ -1744,7 +1746,7 @@ void dma_buf_detach(struct dma_buf *dmabuf, struct dma_buf_attachment *attach)
 	if (dmabuf->ops->detach)
 		dmabuf->ops->detach(dmabuf, attach);
 
-	kfree(attach);
+	kmem_cache_free(kmem_attach_pool, attach);
 }
 EXPORT_SYMBOL_NS_GPL(dma_buf_detach, DMA_BUF);
 
@@ -2522,6 +2524,8 @@ early_param("dmabuf_accounting", setup_early_dmabuf_accounting);
 static int __init dma_buf_init(void)
 {
 	int ret;
+
+	kmem_attach_pool = KMEM_CACHE(dma_buf_attachment, SLAB_HWCACHE_ALIGN | SLAB_PANIC);
 
 	ret = dma_buf_init_sysfs_statistics();
 	if (ret)
