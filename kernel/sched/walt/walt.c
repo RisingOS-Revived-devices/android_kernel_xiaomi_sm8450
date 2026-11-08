@@ -468,11 +468,13 @@ update_window_start(struct rq *rq, u64 wallclock, int event)
  * Assumes rq_lock is held and wallclock was recorded in the same critical
  * section as this function's invocation.
  */
+#define THRESH_CC_UPDATE (2 * NSEC_PER_USEC)
+
 static inline u64 read_cycle_counter(int cpu, u64 wallclock)
 {
 	struct walt_rq *wrq = &per_cpu(walt_rq, cpu);
 
-	if (wrq->last_cc_update != wallclock) {
+	if (wallclock - wrq->last_cc_update > THRESH_CC_UPDATE) {
 		wrq->cycles = walt_get_cycle_counts_cb(cpu, wallclock);
 		wrq->last_cc_update = wallclock;
 	}
@@ -2560,6 +2562,26 @@ update_task_rq_cpu_cycles(struct task_struct *p, struct rq *rq, int event,
 					 p->pid, rq->cpu, wallclock, wallclock,
 					 wts->mark_start, wts->mark_start, event, irqtime);
 			WALT_PANIC((s64)time_delta < 0);
+		}
+
+		/*
+		 * It can happen when a time between two updates
+		 * (for example TASK_UPDATE) is very short. The reason
+		 * is a read_cycle_counter function now can return
+		 * a previous/same CC value if a last read was within
+		 * a THRESH_CC_UPDATE threshold.
+		 *
+		 * In that particular scenario use current CPU OPP
+		 * to scale such task's delta contributions which
+		 * are smaller than THRESH_CC_UPDATE interval.
+		 *
+		 * The aim of using a current frequency is because:
+		 *   - an estimated one can be zero;
+		 *   - we do not want to lose samples due to that.
+		 */
+		if (unlikely(!cycles_delta)) {
+			cycles_delta = sched_cpu_legacy_freq(cpu);
+			time_delta = 1;
 		}
 
 		wrq->task_exec_scale = DIV64_U64_ROUNDUP(cycles_delta *
