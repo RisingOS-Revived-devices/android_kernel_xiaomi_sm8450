@@ -8258,6 +8258,7 @@ void __meminit kswapd_run(int nid)
 	pg_data_t *pgdat = NODE_DATA(nid);
 
 	pgdat_kswapd_lock(pgdat);
+	kcompressd_run(nid);
 	if (!pgdat->kswapd) {
 		pgdat->kswapd = kthread_run(kswapd, pgdat, "kswapd%d", nid);
 		if (IS_ERR(pgdat->kswapd)) {
@@ -8285,6 +8286,7 @@ void __meminit kswapd_stop(int nid)
 		kthread_stop(kswapd);
 		pgdat->kswapd = NULL;
 	}
+	kcompressd_stop(nid);
 	pgdat_kswapd_unlock(pgdat);
 }
 

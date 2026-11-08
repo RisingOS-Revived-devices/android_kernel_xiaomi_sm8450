@@ -61,7 +61,17 @@ static inline unsigned int folio_swap_flags(struct folio *folio)
 {
 	return page_swap_info(&folio->page)->flags;
 }
+
+/* linux/mm/page_io.c: asynchronous swap-out compression for kswapd */
+void kcompressd_run(int nid);
+void kcompressd_stop(int nid);
 #else /* CONFIG_SWAP */
+static inline void kcompressd_run(int nid)
+{
+}
+static inline void kcompressd_stop(int nid)
+{
+}
 struct swap_iocb;
 static inline void swap_readpage(struct page *page, bool do_poll,
 		struct swap_iocb **plug)
