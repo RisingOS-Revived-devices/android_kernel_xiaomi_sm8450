@@ -79,6 +79,9 @@ static u64 walt_load_reported_window;
 
 struct irq_work walt_cpufreq_irq_work;
 struct irq_work walt_migration_irq_work;
+/* cpus of inter-cluster migrations not yet taken by the migration irq_work */
+static DEFINE_RAW_SPINLOCK(speedchange_cpumask_lock);
+static cpumask_t speedchange_cpumask = CPU_MASK_NONE;
 unsigned int walt_rotation_enabled;
 
 unsigned int __read_mostly sched_ravg_window = 20000000;
@@ -1281,7 +1284,6 @@ static void migrate_busy_time_addition(struct task_struct *p, int new_cpu, u64 w
 	struct walt_rq *dest_wrq = &per_cpu(walt_rq, new_cpu);
 	struct walt_task_struct *wts = (struct walt_task_struct *) p->android_vendor_data1;
 	int src_cpu = wts->prev_cpu;
-	struct walt_rq *src_wrq = &per_cpu(walt_rq, src_cpu);
 
 	walt_lockdep_assert_rq(dest_rq, p);
 
@@ -1336,9 +1338,16 @@ static void migrate_busy_time_addition(struct task_struct *p, int new_cpu, u64 w
 
 	migrate_top_tasks_addition(p, dest_rq);
 
-	if (wts->enqueue_after_migration == 2) {
-		src_wrq->notif_pending = true;
-		dest_wrq->notif_pending = true;
+	/*
+	 * A pending rollover irq_work has not taken the rq locks yet, so it
+	 * will see this migration and re-evaluate every cluster anyway.
+	 */
+	if (wts->enqueue_after_migration == 2 &&
+	    !irq_work_is_pending(&walt_cpufreq_irq_work)) {
+		raw_spin_lock(&speedchange_cpumask_lock);
+		cpumask_set_cpu(src_cpu, &speedchange_cpumask);
+		cpumask_set_cpu(new_cpu, &speedchange_cpumask);
+		raw_spin_unlock(&speedchange_cpumask_lock);
 		walt_irq_work_queue(&walt_migration_irq_work);
 	}
 
@@ -4146,6 +4155,7 @@ static void walt_update_irqload(struct rq *rq)
  * @is_migration: if true, performing migration work, else rollover
  * @is_asym_migration: if true, performing migration involving an asym cap sibling
  * @lock_cpus: mask of the cpus involved in the operation.
+ * @mig_cpus: for migration, the source and destination cpus to notify.
  *
  * In rq locked context, update the cluster group load and find
  * the load of the min cluster, while tracking the total aggregate
@@ -4157,7 +4167,8 @@ static void walt_update_irqload(struct rq *rq)
  * involved in the migration.
  */
 static inline void __walt_irq_work_locked(bool is_migration, bool is_asym_migration,
-				bool is_pipeline_sync_migration, struct cpumask *lock_cpus)
+				bool is_pipeline_sync_migration, struct cpumask *lock_cpus,
+				const struct cpumask *mig_cpus)
 {
 	struct walt_sched_cluster *cluster;
 	struct rq *rq;
@@ -4232,10 +4243,8 @@ static inline void __walt_irq_work_locked(bool is_migration, bool is_asym_migrat
 			wrq = &per_cpu(walt_rq, cpu_of(rq));
 
 			if (is_migration) {
-				if (wrq->notif_pending) {
-					wrq->notif_pending = false;
+				if (cpumask_test_cpu(cpu, mig_cpus))
 					wflag |= WALT_CPUFREQ_IC_MIGRATION_BIT;
-				}
 				if (is_asym_migration)
 					wflag |= WALT_CPUFREQ_ASYM_FIXUP_BIT;
 				if (is_pipeline_sync_migration)
@@ -4286,33 +4295,19 @@ static inline void __walt_irq_work_locked(bool is_migration, bool is_asym_migrat
 /**
  * irq_work_restrict_to_mig_clusters() - only allow notified clusters
  * @lock_cpus: mask of the cpus for which the runque should be locked.
+ * @mig_cpus: source and destination cpus of the pending migrations.
  *
- * Remove cpus in clusters that are not part of the migration, using
- * the notif_pending flag to track.
+ * Remove cpus in clusters that are not part of the migration.
  *
  * This is only valid for the migration irq work.
  */
-static inline void irq_work_restrict_to_mig_clusters(cpumask_t *lock_cpus)
+static inline void irq_work_restrict_to_mig_clusters(cpumask_t *lock_cpus,
+						     const cpumask_t *mig_cpus)
 {
 	struct walt_sched_cluster *cluster;
-	struct rq *rq;
-	struct walt_rq *wrq;
-	int cpu;
 
 	for_each_sched_cluster(cluster) {
-		bool keep_locked = false;
-
-		for_each_cpu(cpu, &cluster->cpus) {
-			rq = cpu_rq(cpu);
-			wrq = &per_cpu(walt_rq, cpu_of(rq));
-
-			/* remove this cluster if it's not being notified */
-			if (wrq->notif_pending) {
-				keep_locked = true;
-				break;
-			}
-		}
-		if (!keep_locked)
+		if (!cpumask_intersects(&cluster->cpus, mig_cpus))
 			cpumask_andnot(lock_cpus, lock_cpus, &cluster->cpus);
 	}
 }
@@ -4490,7 +4485,7 @@ DEFINE_PER_CPU(u32, wakeup_ctr);
  */
 static void walt_irq_work(struct irq_work *irq_work)
 {
-	cpumask_t lock_cpus;
+	cpumask_t lock_cpus, mig_cpus = CPU_MASK_NONE;
 	struct walt_rq *wrq;
 	int level;
 	int cpu;
@@ -4505,15 +4500,20 @@ static void walt_irq_work(struct irq_work *irq_work)
 	cpumask_copy(&lock_cpus, cpu_possible_mask);
 
 	if (is_migration) {
-		irq_work_restrict_to_mig_clusters(&lock_cpus);
-
 		/*
-		 * if the notif_pending was handled by a previous
-		 * walt_irq_work invocation, there is no migration
-		 * work.
+		 * Take the migrated cpus atomically: several instances can run
+		 * at once on different cpus, and the one that finds the mask
+		 * already taken has no migration work.
 		 */
-		if (cpumask_empty(&lock_cpus))
+		raw_spin_lock(&speedchange_cpumask_lock);
+		cpumask_copy(&mig_cpus, &speedchange_cpumask);
+		cpumask_clear(&speedchange_cpumask);
+		raw_spin_unlock(&speedchange_cpumask_lock);
+
+		if (cpumask_empty(&mig_cpus))
 			return;
+
+		irq_work_restrict_to_mig_clusters(&lock_cpus, &mig_cpus);
 
 		if (pipeline_in_progress() && cpumask_intersects(&lock_cpus, &pipeline_sync_cpus)) {
 			cpumask_or(&lock_cpus, &lock_cpus, &pipeline_sync_cpus);
@@ -4536,7 +4536,7 @@ static void walt_irq_work(struct irq_work *irq_work)
 	}
 
 	__walt_irq_work_locked(is_migration, is_asym_migration,
-			is_pipeline_sync_migration, &lock_cpus);
+			is_pipeline_sync_migration, &lock_cpus, &mig_cpus);
 
 	if (!is_migration) {
 		for_each_cpu(cpu, cpu_online_mask) {
@@ -4715,7 +4715,6 @@ static void walt_sched_init_rq(struct rq *rq)
 		BUG_ON(!wrq->top_tasks[j]);
 		clear_top_tasks_bitmap(wrq->top_tasks_bitmap[j]);
 	}
-	wrq->notif_pending = false;
 
 	wrq->num_mvp_tasks = 0;
 	INIT_LIST_HEAD(&wrq->mvp_tasks);
