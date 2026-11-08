@@ -107,8 +107,6 @@
   preempt_schedule_notrace
   _printk
   ___ratelimit
-  _raw_spin_lock
-  _raw_spin_unlock
   refcount_warn_saturate
   rng_is_initialized
   scatterwalk_ffwd

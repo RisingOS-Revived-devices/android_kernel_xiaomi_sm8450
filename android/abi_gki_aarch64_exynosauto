@@ -419,12 +419,6 @@
   radix_tree_lookup
   radix_tree_next_chunk
   ___ratelimit
-  _raw_spin_lock
-  _raw_spin_lock_irqsave
-  _raw_spin_trylock
-  _raw_spin_unlock
-  _raw_spin_unlock_bh
-  _raw_spin_unlock_irqrestore
   __rcu_read_lock
   __rcu_read_unlock
   rdev_get_drvdata
@@ -929,8 +923,6 @@
   platform_bus_type
   platform_find_device_by_driver
   platform_get_irq_byname
-  _raw_spin_lock_irq
-  _raw_spin_unlock_irq
   seq_hex_dump
   seq_putc
   seq_release
@@ -946,10 +938,6 @@
 
 # required by exynos_pm_qos.ko
   kstrtoint_from_user
-  _raw_read_lock_irqsave
-  _raw_read_unlock_irqrestore
-  _raw_write_lock_irqsave
-  _raw_write_unlock_irqrestore
   __usecs_to_jiffies
 
 # required by exynos_test_rc.ko
@@ -1483,7 +1471,6 @@
   page_pinner_inited
   __page_pinner_put_page
   __pskb_pull_tail
-  _raw_spin_lock_bh
   register_netdevice
   skb_add_rx_frag
   skb_coalesce_rx_frag

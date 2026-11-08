@@ -595,24 +595,6 @@
   queue_work_on
   ___ratelimit
   rational_best_approximation
-  _raw_read_lock
-  _raw_read_lock_bh
-  _raw_read_lock_irqsave
-  _raw_read_unlock
-  _raw_read_unlock_bh
-  _raw_read_unlock_irqrestore
-  _raw_spin_lock
-  _raw_spin_lock_bh
-  _raw_spin_lock_irq
-  _raw_spin_lock_irqsave
-  _raw_spin_unlock
-  _raw_spin_unlock_bh
-  _raw_spin_unlock_irq
-  _raw_spin_unlock_irqrestore
-  _raw_write_lock_bh
-  _raw_write_lock_irq
-  _raw_write_unlock_bh
-  _raw_write_unlock_irq
   rb_erase
   rb_insert_color
   rcu_barrier
@@ -1339,10 +1321,6 @@
 # required by mhi.ko
   get_random_u32
   pm_wakeup_dev_event
-  _raw_read_lock_irq
-  _raw_read_unlock_irq
-  _raw_write_lock_irqsave
-  _raw_write_unlock_irqrestore
   sysfs_emit_at
   vcalloc
 
@@ -1592,8 +1570,6 @@
   pm_runtime_get_if_active
   put_pid
   put_unused_fd
-  _raw_write_lock
-  _raw_write_unlock
   register_shrinker
   register_vmap_purge_notifier
   reservation_ww_class
@@ -1874,7 +1850,6 @@
   cpu_pm_register_notifier
   dev_pm_genpd_get_next_hrtimer
   __num_online_cpus
-  _raw_spin_trylock
   system_state
   trace_print_symbols_seq
 

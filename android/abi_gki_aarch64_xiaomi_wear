@@ -91,8 +91,6 @@
   __put_task_struct
   queue_delayed_work_on
   queue_work_on
-  _raw_spin_lock_irqsave
-  _raw_spin_unlock_irqrestore
   refcount_warn_saturate
   remove_wait_queue
   skb_dequeue
@@ -199,8 +197,6 @@
   __alloc_skb
   kfree_skb_reason
   mutex_lock_interruptible
-  _raw_spin_lock
-  _raw_spin_unlock
   schedule
 
 # required by rpmsg_core.ko
@@ -325,8 +321,6 @@
   lock_sock_nested
   proto_register
   proto_unregister
-  _raw_write_lock_bh
-  _raw_write_unlock_bh
   release_sock
   security_sock_graft
   sk_alloc
@@ -385,8 +379,6 @@
   kobject_init_and_add
   kobject_put
   kobj_sysfs_ops
-  _raw_spin_lock_irq
-  _raw_spin_unlock_irq
   rb_erase
   rb_insert_color
 

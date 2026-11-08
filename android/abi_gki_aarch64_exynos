@@ -608,17 +608,6 @@
   raw_notifier_call_chain
   raw_notifier_chain_register
   raw_notifier_chain_unregister
-  _raw_read_lock
-  _raw_read_unlock
-  _raw_spin_lock
-  _raw_spin_lock_irq
-  _raw_spin_lock_irqsave
-  _raw_spin_trylock
-  _raw_spin_unlock
-  _raw_spin_unlock_irq
-  _raw_spin_unlock_irqrestore
-  _raw_write_lock_irqsave
-  _raw_write_unlock_irqrestore
   rb_insert_color
   rb_next
   rcu_barrier
@@ -1056,7 +1045,6 @@
   memory_read_from_buffer
   raw_spin_rq_lock_nested
   raw_spin_rq_unlock
-  _raw_write_trylock
   reciprocal_value
   runqueues
   sched_uclamp_used
@@ -1666,8 +1654,6 @@
   dma_heap_get_name
   is_dma_buf_file
   mod_node_page_state
-  _raw_write_lock
-  _raw_write_unlock
   register_shrinker
   remap_pfn_range
   __sg_page_iter_next
@@ -2474,14 +2460,6 @@
   __put_cred
   put_disk
   __put_net
-  _raw_read_lock_bh
-  _raw_read_lock_irqsave
-  _raw_read_unlock_bh
-  _raw_read_unlock_irqrestore
-  _raw_spin_lock_bh
-  _raw_spin_unlock_bh
-  _raw_write_lock_bh
-  _raw_write_unlock_bh
   rb_first
   regcache_sync_region
   __register_blkdev

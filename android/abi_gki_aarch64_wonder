@@ -72,12 +72,6 @@
   queue_delayed_work_on
   queue_work_on
   ___ratelimit
-  _raw_spin_lock
-  _raw_spin_lock_bh
-  _raw_spin_lock_irqsave
-  _raw_spin_unlock
-  _raw_spin_unlock_bh
-  _raw_spin_unlock_irqrestore
   __rcu_read_lock
   __rcu_read_unlock
   register_netdevice_notifier
@@ -171,8 +165,6 @@
   prepare_to_wait_event
   put_device
   __put_net
-  _raw_spin_lock_irq
-  _raw_spin_unlock_irq
   rb_erase
   rb_insert_color
   refcount_warn_saturate
