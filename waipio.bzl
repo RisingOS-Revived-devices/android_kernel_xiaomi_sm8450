@@ -172,6 +172,7 @@ def define_waipio():
         "drivers/soc/qcom/glink_probe.ko",
         "drivers/soc/qcom/gplaf_scmi.ko",
         "drivers/soc/qcom/hung_task_enh.ko",
+        "drivers/soc/qcom/hyp_core_ctl.ko",
         "drivers/soc/qcom/llcc-qcom.ko",
         "drivers/soc/qcom/llcc_perfmon.ko",
         "drivers/soc/qcom/mdt_loader.ko",
