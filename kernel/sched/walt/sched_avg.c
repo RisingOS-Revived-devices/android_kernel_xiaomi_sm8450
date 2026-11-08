@@ -339,19 +339,15 @@ void sched_update_nr_prod(int cpu, int enq)
  */
 unsigned int sched_get_cpu_util_pct(int cpu)
 {
-	struct rq *rq = cpu_rq(cpu);
 	u64 util;
-	unsigned long capacity, flags;
+	unsigned long capacity;
 	unsigned int busy;
 	struct walt_rq *wrq = &per_cpu(walt_rq, cpu);
 
-	raw_spin_lock_irqsave(&rq->__lock, flags);
-
-	capacity = capacity_orig_of(cpu);
-
-	util = wrq->prev_runnable_sum + wrq->grp_time.prev_runnable_sum;
+	/* lockless: snapshot published by walt_commit_prev_group_run_sum() */
+	util = atomic64_read(&wrq->prev_group_runnable_sum);
 	util = scale_time_to_util(util);
-	raw_spin_unlock_irqrestore(&rq->__lock, flags);
+	capacity = capacity_orig_of(cpu);
 
 	util = (util >= capacity) ? capacity : util;
 	busy = div64_ul((util * 100), capacity);

@@ -57,6 +57,17 @@ DEFINE_SPINLOCK(enforce_high_irq_cpu_lock);
 DEFINE_PER_CPU(int, enforce_high_irq_cpus_refcount);
 
 DEFINE_PER_CPU(struct walt_rq, walt_rq);
+
+/*
+ * Publish prev_runnable_sum + grp_time.prev_runnable_sum for the lockless
+ * reader sched_get_cpu_util_pct(). Call with rq->__lock held, after the last
+ * change to either sum in the critical section.
+ */
+static inline void walt_commit_prev_group_run_sum(struct walt_rq *wrq)
+{
+	atomic64_set(&wrq->prev_group_runnable_sum,
+		     wrq->prev_runnable_sum + wrq->grp_time.prev_runnable_sum);
+}
 unsigned int sysctl_sched_user_hint;
 static u64 sched_clock_last;
 static bool walt_clock_suspended;
@@ -897,6 +908,8 @@ static inline void account_load_subtractions(struct rq *rq)
 				(s64)wrq->nt_curr_runnable_sum);
 		wrq->nt_curr_runnable_sum = 0;
 	}
+
+	walt_commit_prev_group_run_sum(wrq);
 }
 
 static inline void create_subtraction_entry(struct rq *rq, u64 ws, int index)
@@ -1245,6 +1258,7 @@ static void migrate_busy_time_subtraction(struct task_struct *p, int new_cpu)
 		if (wts->enqueue_after_migration == 2)
 			migrate_inter_cluster_subtraction(p, task_cpu(p), new_task);
 	}
+	walt_commit_prev_group_run_sum(src_wrq);
 
 	migrate_top_tasks_subtraction(p, src_rq);
 
@@ -1318,6 +1332,7 @@ static void migrate_busy_time_addition(struct task_struct *p, int new_cpu, u64 w
 		if (wts->enqueue_after_migration == 2)
 			migrate_inter_cluster_addition(p, new_cpu, new_task);
 	}
+	walt_commit_prev_group_run_sum(dest_wrq);
 
 	migrate_top_tasks_addition(p, dest_rq);
 
@@ -2844,6 +2859,8 @@ static void walt_update_task_ravg(struct task_struct *p, struct rq *rq, int even
 				&wrq->grp_time, wrq, wts, atomic64_read(&walt_irq_work_lastq_ws));
 
 done:
+	/* covers rollover_cpu_window() and update_cpu_busy_time() */
+	walt_commit_prev_group_run_sum(wrq);
 	wts->mark_start = wallclock;
 	if (wts->mark_start > (wts->window_start + sched_ravg_window))
 		WALT_BUG(WALT_BUG_WALT, p,
@@ -4059,6 +4076,7 @@ static void transfer_busy_time(struct rq *rq,
 	wts->curr_window_cpu[cpu] = wts->curr_window;
 	wts->prev_window_cpu[cpu] = wts->prev_window;
 
+	walt_commit_prev_group_run_sum(wrq);
 	trace_sched_migration_update_sum(p, migrate_type, rq);
 }
 
@@ -4677,6 +4695,7 @@ static void walt_sched_init_rq(struct rq *rq)
 	wrq->curr_runnable_sum = wrq->prev_runnable_sum = 0;
 	wrq->nt_curr_runnable_sum = wrq->nt_prev_runnable_sum = 0;
 	memset(&wrq->grp_time, 0, sizeof(struct group_cpu_time));
+	walt_commit_prev_group_run_sum(wrq);
 	wrq->old_busy_time = 0;
 	wrq->old_estimated_time = 0;
 	wrq->walt_stats.pred_demands_sum_scaled = 0;

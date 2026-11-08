@@ -265,6 +265,8 @@ struct walt_rq {
 	int			prev_top;
 	int			curr_top;
 	bool			notif_pending;
+	/* prev_runnable_sum + grp_time.prev_runnable_sum, read without rq lock */
+	atomic64_t		prev_group_runnable_sum;
 	bool			high_irqload;
 	u64			last_cc_update;
 	u64			cycles;
