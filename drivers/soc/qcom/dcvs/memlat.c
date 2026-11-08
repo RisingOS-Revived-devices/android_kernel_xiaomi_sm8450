@@ -836,6 +836,31 @@ show_attr(spm_drop_pct);
 show_attr(spm_thres);
 show_attr(spm_window_size);
 
+/*
+ * 5.10 node: freq_scale_limit_mhz capped the ipm-scaled CPU frequency and
+ * scaled only below it. 6.6 splits that into freq_scale_ceil_mhz (same cap)
+ * and freq_scale_floor_mhz (lower bound, default 5000 = scaling off), so
+ * the old node writes the ceiling and drops the floor to 0.
+ */
+static ssize_t show_freq_scale_limit_mhz(struct kobject *kobj,
+			struct attribute *attr, char *buf)
+{
+	return show_freq_scale_ceil_mhz(kobj, attr, buf);
+}
+
+static ssize_t store_freq_scale_limit_mhz(struct kobject *kobj,
+			struct attribute *attr, const char *buf,
+			size_t count)
+{
+	ssize_t ret = store_freq_scale_ceil_mhz(kobj, attr, buf, count);
+
+	if (ret < 0)
+		return ret;
+	ret = store_freq_scale_floor_mhz(kobj, attr, "0", 1);
+	if (ret < 0)
+		return ret;
+	return count;
+}
 
 MEMLAT_ATTR_RW(sample_ms);
 MEMLAT_ATTR_RW(cpucp_sample_ms);
@@ -861,6 +886,7 @@ MEMLAT_ATTR_RW(wb_pct_thres);
 MEMLAT_ATTR_RW(wb_filter_ipm);
 MEMLAT_ATTR_RW(freq_scale_ceil_mhz);
 MEMLAT_ATTR_RW(freq_scale_floor_mhz);
+MEMLAT_ATTR_RW(freq_scale_limit_mhz);
 MEMLAT_ATTR_RW(spm_thres);
 MEMLAT_ATTR_RW(spm_drop_pct);
 MEMLAT_ATTR_RW(spm_window_size);
@@ -899,6 +925,7 @@ static struct attribute *memlat_mon_attrs[] = {
 	&wb_filter_ipm.attr,
 	&freq_scale_ceil_mhz.attr,
 	&freq_scale_floor_mhz.attr,
+	&freq_scale_limit_mhz.attr,
 	&spm_thres.attr,
 	&spm_drop_pct.attr,
 	&spm_window_size.attr,
