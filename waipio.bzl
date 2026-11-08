@@ -26,6 +26,7 @@ def define_waipio():
         "drivers/cpufreq/qcom-cpufreq-hw.ko",
         "drivers/cpuidle/governors/qcom_lpm.ko",
         "drivers/crypto/qcom-rng.ko",
+        "drivers/devfreq/adreno_idler.ko",
         "drivers/devfreq/governor_gpubw_mon.ko",
         "drivers/devfreq/governor_msm_adreno_tz.ko",
         "drivers/dma-buf/heaps/qcom_dma_heaps.ko",
