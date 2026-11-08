@@ -6110,6 +6110,14 @@ fail:
 #endif
 
 #ifdef CONFIG_PER_VMA_LOCK
+static bool __read_mostly allow_file_spec_access;
+static int __init allow_file_spec_access_setup(char *str)
+{
+	allow_file_spec_access = true;
+	return 1;
+}
+__setup("allow_file_spec_access", allow_file_spec_access_setup);
+
 /*
  * Lookup and lock a VMA under RCU protection. Returned VMA is guaranteed to be
  * stable and not isolated. If the VMA is not found or is being modified the
@@ -6141,6 +6149,13 @@ retry:
 		/* The area was replaced with another one */
 		goto retry;
 	}
+
+	/*
+	 * Without allow_file_spec_access only anonymous VMAs are handled
+	 * without mmap_lock, as the 5.10 speculative fault path did.
+	 */
+	if (!vma_is_anonymous(vma) && !allow_file_spec_access)
+		goto inval_end_read;
 
 	rcu_read_unlock();
 	return vma;
