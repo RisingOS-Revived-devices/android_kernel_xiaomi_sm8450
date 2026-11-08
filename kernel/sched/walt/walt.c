@@ -101,6 +101,7 @@ u64 walt_sched_clock(void)
 		return sched_clock_last;
 	return sched_clock();
 }
+EXPORT_SYMBOL_GPL(walt_sched_clock);
 
 static void walt_resume(void)
 {
@@ -4987,6 +4988,11 @@ static void android_rvh_try_to_wake_up(void *unused, struct task_struct *p)
 
 	if (unlikely(walt_disabled))
 		return;
+
+	/* task forked before WALT set up its per-task data */
+	if (wts->mvp_list.prev == NULL && wts->mvp_list.next == NULL)
+		init_new_task_load(p);
+
 	rq_lock_irqsave(rq, &rf);
 	old_load = task_load(p);
 	wallclock = walt_sched_clock();
