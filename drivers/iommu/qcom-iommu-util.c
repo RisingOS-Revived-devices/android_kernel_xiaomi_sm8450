@@ -816,9 +816,14 @@ static unsigned long limit_align_shift(struct iova_domain *iovad,
 
 	new_shift = iovad_get_max_align_shift(iovad);
 
-	/* If device doesn't override reuse current value */
-	if (!new_shift)
+	/* If device doesn't override, apply the global limit or reuse current value */
+	if (!new_shift) {
+#ifdef CONFIG_IOMMU_LIMIT_IOVA_ALIGNMENT
+		new_shift = CONFIG_IOMMU_IOVA_ALIGNMENT;
+#else
 		return shift;
+#endif
+	}
 
 	max_align_shift = new_shift + MAX_ALIGN_PAGE_SHIFT - iova_shift(iovad);
 

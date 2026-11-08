@@ -938,15 +938,6 @@
   queue_delayed_work_on
   queue_work_on
   ___ratelimit
-  _raw_spin_lock
-  _raw_spin_lock_bh
-  _raw_spin_lock_irq
-  _raw_spin_lock_irqsave
-  _raw_spin_trylock
-  _raw_spin_unlock
-  _raw_spin_unlock_bh
-  _raw_spin_unlock_irq
-  _raw_spin_unlock_irqrestore
   rb_erase
   rb_first
   rb_insert_color

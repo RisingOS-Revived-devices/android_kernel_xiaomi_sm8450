@@ -152,7 +152,6 @@
   qdisc_watchdog_schedule_range_ns
   radix_tree_lookup_slot
   radix_tree_replace_slot
-  _raw_write_trylock
   reciprocal_value
   register_tcf_proto_ops
   regulator_map_voltage_linear_range

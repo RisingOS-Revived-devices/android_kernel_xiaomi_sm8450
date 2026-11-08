@@ -457,7 +457,11 @@ void __drm_dev_dbg(struct _ddebug *desc, const struct device *dev,
 	}								\
 })
 
-#if !defined(CONFIG_DRM_USE_DYNAMIC_DEBUG)
+#if !defined(CONFIG_DRM_DEBUG_PRINT)
+/* Stubbed out: no call is emitted, the arguments are only type-checked */
+#define drm_dev_dbg(dev, cat, fmt, ...)				\
+	({ if (0) __drm_dev_dbg(NULL, dev, cat, fmt, ##__VA_ARGS__); })
+#elif !defined(CONFIG_DRM_USE_DYNAMIC_DEBUG)
 #define drm_dev_dbg(dev, cat, fmt, ...)				\
 	__drm_dev_dbg(NULL, dev, cat, fmt, ##__VA_ARGS__)
 #else
@@ -572,7 +576,11 @@ void ___drm_dbg(struct _ddebug *desc, enum drm_debug_category category, const ch
 __printf(1, 2)
 void __drm_err(const char *format, ...);
 
-#if !defined(CONFIG_DRM_USE_DYNAMIC_DEBUG)
+#if !defined(CONFIG_DRM_DEBUG_PRINT)
+/* Stubbed out: no call is emitted, the arguments are only type-checked */
+#define __drm_dbg(cat, fmt, ...)					\
+	({ if (0) ___drm_dbg(NULL, cat, fmt, ##__VA_ARGS__); })
+#elif !defined(CONFIG_DRM_USE_DYNAMIC_DEBUG)
 #define __drm_dbg(cat, fmt, ...)		___drm_dbg(NULL, cat, fmt, ##__VA_ARGS__)
 #else
 #define __drm_dbg(cat, fmt, ...)					\

@@ -2,7 +2,7 @@
 VERSION = 6
 PATCHLEVEL = 6
 SUBLEVEL = 144
-EXTRAVERSION =
+EXTRAVERSION =-PhoenyxCore.LTO.v3
 NAME = Pinguïn Aangedreven
 
 # *DOCUMENTATION*
@@ -408,7 +408,7 @@ include $(srctree)/scripts/subarch.include
 # Alternatively CROSS_COMPILE can be set in the environment.
 # Default value for CROSS_COMPILE is not to prefix executables
 # Note: Some architectures assign CROSS_COMPILE in their arch/*/Makefile
-ARCH		?= $(SUBARCH)
+ARCH		:= arm64
 
 # Architecture as present in compile.h
 UTS_MACHINE 	:= $(ARCH)
@@ -992,6 +992,9 @@ endif
 
 # Limit inlining across translation units to reduce binary size
 KBUILD_LDFLAGS += -mllvm -import-instr-limit=5
+# Set O3 optimization level for LTO
+KBUILD_LDFLAGS		+= --plugin-opt=O3
+KBUILD_LDFLAGS      += --lto-O3
 
 # Check for frame size exceeding threshold during prolog/epilog insertion
 # when using lld < 13.0.0.
@@ -2196,3 +2199,46 @@ FORCE:
 # Declare the contents of the PHONY variable as phony.  We keep that
 # information in a variable so we can use it in if_changed and friends.
 .PHONY: $(PHONY)
+
+KBUILD_CFLAGS += -march=armv9-a+crypto+nosve+dotprod -mcpu=cortex-a510 -mtune=cortex-a510
+KBUILD_AFLAGS += -march=armv9-a+crypto+nosve+dotprod -mcpu=cortex-a510 -mtune=cortex-a510
+
+ifdef CONFIG_LLVM_POLLY
+# Android's prebuilt clang ships Polly only as a plugin (lib/LLVMPolly.so)
+# instead of linking it in; load the plugin when it is there.
+POLLY_PLUGIN	:= $(wildcard $(dir $(shell $(CC) -print-resource-dir 2>/dev/null))../LLVMPolly.so)
+ifneq ($(POLLY_PLUGIN),)
+POLLY_LOAD	:= -fplugin=$(POLLY_PLUGIN) -fpass-plugin=$(POLLY_PLUGIN)
+endif
+
+POLLY_CFLAGS	:= -fvectorize -funroll-loops -mllvm -polly \
+		-mllvm -polly-run-inliner \
+		-mllvm -polly-ast-use-context \
+		-mllvm -polly-detect-keep-going \
+		-mllvm -polly-invariant-load-hoisting \
+		-mllvm -polly-vectorizer=stripmine
+
+ifeq ($(shell test $(CONFIG_CLANG_VERSION) -gt 130000; echo $$?),0)
+POLLY_CFLAGS	+= -mllvm -polly-loopfusion-greedy=1 \
+		-mllvm -polly-reschedule=1 \
+		-mllvm -polly-postopts=1 \
+		-mllvm -polly-num-threads=0 \
+		-mllvm -polly-omp-backend=LLVM \
+		-mllvm -polly-scheduling=dynamic \
+		-mllvm -polly-scheduling-chunksize=1
+else
+POLLY_CFLAGS	+= -mllvm -polly-opt-fusion=max
+endif
+
+ifdef need-compiler
+# Only pass the flags when the compiler accepts them, so a clang without
+# Polly does not break the build.
+ifneq ($(call cc-option,$(POLLY_LOAD) -mllvm -polly),)
+KBUILD_CFLAGS	+= $(POLLY_LOAD) $(POLLY_CFLAGS)
+else
+$(warning CONFIG_LLVM_POLLY: $(CC) cannot load LLVM Polly, building without it)
+endif
+endif
+endif
+KBUILD_CFLAGS += -Wuninitialized
+KBUILD_CFLAGS += -Wno-sometimes-uninitialized

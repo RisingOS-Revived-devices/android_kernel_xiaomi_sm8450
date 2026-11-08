@@ -92,6 +92,7 @@ obj-$(CONFIG_USB_BAM) += usb_bam.o
 obj-$(CONFIG_QCOM_CPU_VENDOR_HOOKS) += qcom_cpu_vendor_hooks.o
 obj-$(CONFIG_SPS) += sps/
 obj-$(CONFIG_QCOM_RAMDUMP) += qcom_ramdump.o
+obj-$(CONFIG_QCOM_MICRODUMP) += microdump_collector.o
 obj-$(CONFIG_QCOM_SYSMON_SUBSYSTEM_STATS) += sysmon_subsystem_stats.o
 obj-$(CONFIG_QCOM_CDSP_RM) += cdsprm.o
 obj-$(CONFIG_QCOM_ADSP_SLEEPMON) += adsp_sleepmon.o

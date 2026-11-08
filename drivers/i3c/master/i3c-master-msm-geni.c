@@ -459,14 +459,12 @@ if (print) { \
 	} \
 } while (0)
 
+/* Debug prints compiled out like GENI_SE_DBG(); arguments stay referenced */
 #define GENI_SE_I3C_DBG(log_ctx, print, dev, x...) do { \
-ipc_log_string(log_ctx, x); \
-if (print) { \
-	if (dev) \
-		dev_dbg((dev), x); \
-	else \
-		pr_debug(x); \
-	} \
+	(void)(log_ctx); \
+	(void)(print); \
+	(void)(dev); \
+	no_printk(x); \
 } while (0)
 
 #define I3C_LOG_DBG(log_ctx, print, dev, x...) do { \

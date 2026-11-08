@@ -238,10 +238,6 @@
   queue_delayed_work_on
   queue_work_on
   ___ratelimit
-  _raw_spin_lock
-  _raw_spin_lock_irqsave
-  _raw_spin_unlock
-  _raw_spin_unlock_irqrestore
   refcount_dec_and_mutex_lock
   refcount_warn_saturate
   register_chrdev_region

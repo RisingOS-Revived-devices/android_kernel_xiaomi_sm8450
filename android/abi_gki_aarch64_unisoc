@@ -64,10 +64,6 @@
   put_device
   __put_task_struct
   queue_work_on
-  _raw_spin_lock
-  _raw_spin_lock_irqsave
-  _raw_spin_unlock
-  _raw_spin_unlock_irqrestore
   __rcu_read_lock
   __rcu_read_unlock
   schedule
@@ -411,12 +407,6 @@
   pskb_expand_head
   __pskb_pull_tail
   __put_net
-  _raw_read_lock_bh
-  _raw_read_unlock_bh
-  _raw_spin_lock_bh
-  _raw_spin_unlock_bh
-  _raw_write_lock_bh
-  _raw_write_unlock_bh
   refcount_warn_saturate
   __register_chrdev
   register_netdevice
@@ -455,8 +445,6 @@
   kill_fasync
   kobject_get
   kobject_put
-  _raw_spin_lock_irq
-  _raw_spin_unlock_irq
   schedule_timeout
   sprintf
 
@@ -689,10 +677,6 @@
   kstrdup
   memstart_addr
   preempt_schedule
-  _raw_read_lock
-  _raw_read_unlock
-  _raw_write_lock
-  _raw_write_unlock
   register_shrinker
   __SetPageMovable
   unlock_page
@@ -778,7 +762,6 @@
   percpu_counter_batch
   pin_user_pages
   pin_user_pages_remote
-  _raw_spin_trylock
   rb_prev
   rb_replace_node
   regulator_get_optional
