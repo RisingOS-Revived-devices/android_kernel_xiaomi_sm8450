@@ -10,6 +10,7 @@
 
 #include <linux/module.h>
 #include <trace/hooks/fault.h>
+#include <trace/hooks/vmscan.h>
 #include <asm/esr.h>
 #include <asm/ptrace.h>
 
@@ -27,6 +28,11 @@ static void can_fixup_sea(void *unused, unsigned long addr, unsigned long esr,
 		*can_fixup = false;
 }
 
+static void balance_reclaim(void *unused, bool *balance_anon_file_reclaim)
+{
+	*balance_anon_file_reclaim = true;
+}
+
 static int __init init_mem_hooks(void)
 {
 	int ret;
@@ -35,6 +41,15 @@ static int __init init_mem_hooks(void)
 	if (ret) {
 		pr_err("Failed to register try_fixup_sea\n");
 		return ret;
+	}
+
+	if (IS_ENABLED(CONFIG_QCOM_BALANCE_ANON_FILE_RECLAIM)) {
+		ret = register_trace_android_rvh_set_balance_anon_file_reclaim(balance_reclaim,
+									      NULL);
+		if (ret) {
+			pr_err("Failed to register balance_anon_file_reclaim hooks\n");
+			return ret;
+		}
 	}
 
 	return 0;

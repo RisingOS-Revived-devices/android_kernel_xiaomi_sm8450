@@ -1048,6 +1048,15 @@ config QCOM_MEM_HOOKS
 	  If unsure, say 'M' here to ensure that the hooks are compiled
 	  in.
 
+config QCOM_BALANCE_ANON_FILE_RECLAIM
+	bool "During reclaim treat anon and file backed pages equally"
+	depends on SWAP && QCOM_MEM_HOOKS
+	help
+	  When performing memory reclaim treat anonymous and file backed pages
+	  equally.
+	  Swapping anonymous pages out to memory can be efficient enough to justify
+	  treating anonymous and file backed pages equally.
+
 config QCOM_FSA4480_I2C
 	tristate "Fairchild FSA4480 chip with I2C"
 	select REGMAP_I2C
