@@ -358,9 +358,20 @@ void futex_wait_queue(struct futex_hash_bucket *hb, struct futex_q *q,
 		 */
 		if (!timeout || timeout->task) {
 			trace_android_vh_futex_sleep_start(current);
+#ifdef CONFIG_SCHED_BORE
+			/*
+			 * BORE protect_slice_lv: full deadline window for futex
+			 * waiters while they sleep. Cleared below on return, so
+			 * it is never stale across wakeups.
+			 */
+			current->se.futex_waiting = true;
+#endif /* CONFIG_SCHED_BORE */
 			schedule();
 		}
 	}
+#ifdef CONFIG_SCHED_BORE
+	current->se.futex_waiting = false;
+#endif /* CONFIG_SCHED_BORE */
 	__set_current_state(TASK_RUNNING);
 }
 

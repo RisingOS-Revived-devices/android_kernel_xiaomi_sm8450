@@ -95,6 +95,9 @@
 #include "../workqueue_internal.h"
 #include "../../io_uring/io-wq.h"
 #include "../smpboot.h"
+#ifdef CONFIG_SCHED_BORE
+#include <linux/sched/bore.h>
+#endif /* CONFIG_SCHED_BORE */
 
 #include <trace/hooks/sched.h>
 #include <trace/hooks/cgroup.h>
@@ -1340,7 +1343,15 @@ int tg_nop(struct task_group *tg, void *data)
 
 static void set_load_weight(struct task_struct *p, bool update_load)
 {
+#ifdef CONFIG_SCHED_BORE
+	/*
+	 * 7.0.0: the weight follows the effective prio (static + BORE
+	 * burst score), so a static-prio change keeps the demotion.
+	 */
+	int prio = effective_prio_bore(p);
+#else /* !CONFIG_SCHED_BORE */
 	int prio = p->static_prio - MAX_RT_PRIO;
+#endif /* CONFIG_SCHED_BORE */
 	struct load_weight *load = &p->se.load;
 
 	/*
@@ -10187,6 +10198,12 @@ void __init sched_init(void)
 #ifdef CONFIG_SMP
 	BUG_ON(&dl_sched_class != &stop_sched_class + 1);
 #endif
+
+#ifdef CONFIG_SCHED_BORE
+	sched_init_bore();
+	printk(KERN_INFO "%s %s by %s\n", SCHED_BORE_PROGNAME,
+		SCHED_BORE_VERSION, SCHED_BORE_AUTHOR);
+#endif /* CONFIG_SCHED_BORE */
 
 	wait_bit_init();
 
