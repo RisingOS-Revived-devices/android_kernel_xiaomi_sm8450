@@ -534,6 +534,25 @@ config LRNG_CPU_ENTROPY_RATE
 	  Note, this option is overwritten when the option
 	  CONFIG_RANDOM_TRUST_CPU is set.
 
+# 6.2 dropped these from drivers/char/Kconfig; random.c trusts both by default
+config RANDOM_TRUST_CPU
+	bool "Fully credit the CPU entropy source"
+	default y
+	depends on LRNG_CPU
+	help
+	  Credit the data of the CPU entropy source with full entropy,
+	  as random.c does by default. This may be changed at boot time
+	  with "random.trust_cpu=on/off".
+
+config RANDOM_TRUST_BOOTLOADER
+	bool "Fully credit the bootloader-supplied seed"
+	default y
+	help
+	  Credit the seed supplied by the bootloader or boot environment
+	  (e.g. the device tree rng-seed) with full entropy, as random.c
+	  does by default. This may be changed at boot time with
+	  "random.trust_bootloader=on/off".
+
 comment "Scheduler Entropy Source"
 
 config LRNG_SCHED
