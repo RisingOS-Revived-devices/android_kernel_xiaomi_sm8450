@@ -79,6 +79,17 @@ config QCOM_DMABUF_HEAPS_CMA
 	  Choose this option to build the QCOM DMA-BUF CMA heap.
 	  If in doubt, say Y here.
 
+config QCOM_DMABUF_HEAPS_BITSTREAM_CONTIG
+	bool "QCOM DMA-BUF Bitstream Contiguous Heap"
+	depends on QCOM_DMABUF_HEAPS && QCOM_SECURE_BUFFER
+	depends on QCOM_DMABUF_HEAPS_CMA
+	help
+	  Choose this option to build the QCOM bitstream contiguous
+	  heap. This heap, allocates memory from the display heap
+	  and then assigns to the CP_BITSTREAM endpoint, before
+	  returning this allocation to user space. It uses the name
+	  'system-secure'. If in doubt, say N here.
+
 config QCOM_DMABUF_HEAPS_CARVEOUT
 	bool "QCOM dma-buf Carveout Heap"
 	depends on QCOM_DMABUF_HEAPS

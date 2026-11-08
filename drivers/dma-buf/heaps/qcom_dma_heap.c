@@ -11,6 +11,7 @@
 
 #include <linux/qcom_dma_heap.h>
 #include <linux/qcom_tvm_heap.h>
+#include "qcom_bitstream_contig_heap.h"
 #include "qcom_cma_heap.h"
 #include "qcom_dt_parser.h"
 #include "qcom_system_heap.h"
@@ -75,6 +76,8 @@ static int qcom_dma_heap_probe(struct platform_device *pdev)
 			pr_info("%s: DMA-BUF Heap: Created %s\n", __func__,
 				heap_data->name);
 	}
+
+	qcom_add_bitstream_contig_heap("system-secure");
 
 	free_pdata(heaps);
 
