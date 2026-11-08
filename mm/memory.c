@@ -6549,9 +6549,15 @@ int __access_remote_vm(struct mm_struct *mm, unsigned long addr, void *buf,
 #ifdef CONFIG_KSU_SUSFS_SUS_MAP
 		struct page *page = NULL;
 
+		/*
+		 * vma is declared per iteration on 6.6, so look up the one
+		 * covering addr before reading, as 5.10 checked the vma it
+		 * had before get_user_pages_remote().
+		 */
+		vma = vma_lookup(mm, addr);
 		if (vma && vma->vm_file && SUSFS_IS_INODE_SUS_MAP(file_inode(vma->vm_file)))
 			break;
-		
+
 		page = get_user_page_vma_remote(mm, addr,
 							     gup_flags, &vma);
 #else
