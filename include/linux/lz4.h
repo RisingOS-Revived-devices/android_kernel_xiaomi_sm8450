@@ -10,7 +10,8 @@
 #define LZ4_MEM_COMPRESS	LZ4_STREAM_MINSIZE
 #define LZ4HC_MEM_COMPRESS	LZ4_STREAMHC_MINSIZE
 
-#define LZ4HC_MIN_CLEVEL	LZ4HC_CLEVEL_MIN
-#define LZ4HC_MAX_CLEVEL	LZ4HC_CLEVEL_MAX
+/* old kernel range; f2fs stores it on disk, lz4hc clamps >12 to 12 */
+#define LZ4HC_MIN_CLEVEL	3
+#define LZ4HC_MAX_CLEVEL	16
 
 #endif
