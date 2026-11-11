@@ -203,7 +203,7 @@ void invalidate_batched_entropy(void)
 		spin_unlock_irqrestore(&batched_entropy->batch_lock, flags);
 
 		batched_entropy = per_cpu_ptr(&batched_entropy_u64, cpu);
-		spin_lock(&batched_entropy->batch_lock);
+		spin_lock_irqsave(&batched_entropy->batch_lock, flags);
 		batched_entropy->position = 0;
 		spin_unlock_irqrestore(&batched_entropy->batch_lock, flags);
 	}
