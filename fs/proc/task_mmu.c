@@ -568,9 +568,8 @@ show_map_vma(struct seq_file *m, struct vm_area_struct *vma)
 				start = vma->vm_start;
 				end = VMA_PAD_START(vma);
 				__fold_filemap_fixup_entry(&((struct proc_maps_private *)m->private)->iter, &end);
-				show_vma_header_prefix(m, start, end, flags, pgoff, dev, ino);
-				seq_pad(m, ' ');
-				if (spoofed_redirected_name)
+				if (!show_vma_header_prefix(m, start, end, flags, pgoff, dev, ino) &&
+				    spoofed_redirected_name)
 					seq_puts(m, spoofed_redirected_name);
 				seq_putc(m, '\n');
 				srcu_read_unlock(&susfs_srcu_open_redirect, srcu_idx);
@@ -1406,7 +1405,6 @@ bypass_orig_flow:
 
 empty_set:
 	show_vma_header_prefix(m, vma_start, last_vma_end, 0, 0, 0, 0);
-	seq_pad(m, ' ');
 	seq_puts(m, "[rollup]\n");
 
 	__show_smap(m, &mss, true);
