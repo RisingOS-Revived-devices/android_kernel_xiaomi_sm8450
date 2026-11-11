@@ -123,8 +123,6 @@
 #include <trace/events/sock.h>
 #include <trace/hooks/net.h>
 
-int sysctl_reserved_port_bind __read_mostly = 1;
-
 #define AID_INET KGIDT_INIT(3003)
 
 static inline int current_has_network(void)
