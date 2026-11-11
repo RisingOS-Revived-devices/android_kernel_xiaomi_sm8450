@@ -40,6 +40,7 @@ struct zstd_ctx {
 	zstd_dctx *dctx;
 	void *cwksp;
 	void *dwksp;
+	zstd_parameters params;	/* cctx workspace is sized for these */
 };
 
 static zstd_parameters zstd_params(void)
@@ -50,8 +51,10 @@ static zstd_parameters zstd_params(void)
 static int zstd_comp_init(struct zstd_ctx *ctx)
 {
 	int ret = 0;
-	const zstd_parameters params = zstd_params();
-	const size_t wksp_size = zstd_cctx_workspace_bound(&params.cParams);
+	size_t wksp_size;
+
+	ctx->params = zstd_params();
+	wksp_size = zstd_cctx_workspace_bound(&ctx->params.cParams);
 
 	ctx->cwksp = vzalloc(wksp_size);
 	if (!ctx->cwksp) {
@@ -170,9 +173,8 @@ static int __zstd_compress(const u8 *src, unsigned int slen,
 {
 	size_t out_len;
 	struct zstd_ctx *zctx = ctx;
-	const zstd_parameters params = zstd_params();
 
-	out_len = zstd_compress_cctx(zctx->cctx, dst, *dlen, src, slen, &params);
+	out_len = zstd_compress_cctx(zctx->cctx, dst, *dlen, src, slen, &zctx->params);
 	if (zstd_is_error(out_len))
 		return -EINVAL;
 	*dlen = out_len;
