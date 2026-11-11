@@ -803,15 +803,15 @@ static int gh_vcpu_populate_affinity_info(gh_vmid_t vmid, gh_label_t cpu_idx,
 {
 	int ret = 0;
 
-	if (!init_done) {
-		pr_err("Driver probe failed\n");
-		ret = -ENXIO;
-		goto out;
-	}
-
 	if (!is_tuivm(vmid)) {
 		pr_info("Skip populating VCPU affinity info for other VM vmid%d\n",
 			vmid);
+		goto out;
+	}
+
+	if (!init_done) {
+		pr_err("Driver probe failed\n");
+		ret = -ENXIO;
 		goto out;
 	}
 
@@ -856,15 +856,15 @@ out:
 static int gh_vcpu_unpopulate_affinity_info(gh_vmid_t vmid, gh_label_t cpu_idx,
 					    gh_capid_t cap_id, int *linux_irq)
 {
-	if (!init_done) {
-		pr_err("Driver probe failed\n");
-		return -ENXIO;
-	}
-
 	if (!is_tuivm(vmid)) {
 		pr_info("Skip unpopulating VCPU affinity info for other VM vmid%d\n",
 			vmid);
 		goto out;
+	}
+
+	if (!init_done) {
+		pr_err("Driver probe failed\n");
+		return -ENXIO;
 	}
 
 	if (is_vcpu_info_populated) {
@@ -1084,6 +1084,12 @@ static int gh_vpm_grp_populate_info(gh_vmid_t vmid, gh_capid_t cap_id, int virq_
 {
 	int ret = 0;
 
+	if (!is_tuivm(vmid)) {
+		pr_info("Skip populating VPM GRP info for other VM vmid%d\n",
+			vmid);
+		goto out;
+	}
+
 	if (!init_done) {
 		pr_err("%s: Driver probe failed\n", __func__);
 		ret = -ENXIO;
@@ -1093,12 +1099,6 @@ static int gh_vpm_grp_populate_info(gh_vmid_t vmid, gh_capid_t cap_id, int virq_
 	if (virq_num < 0) {
 		pr_err("%s: Invalid IRQ number\n", __func__);
 		ret = -EINVAL;
-		goto out;
-	}
-
-	if (!is_tuivm(vmid)) {
-		pr_info("Skip populating VPM GRP info for other VM vmid%d\n",
-			vmid);
 		goto out;
 	}
 
@@ -1120,15 +1120,15 @@ out:
 
 static int gh_vpm_grp_unpopulate_info(gh_vmid_t vmid, int *irq)
 {
-	if (!init_done) {
-		pr_err("%s: Driver probe failed\n", __func__);
-		return -ENXIO;
-	}
-
 	if (!is_tuivm(vmid)) {
 		pr_info("Skip unpopulating VPM GRP info for other VM vmid%d\n",
 			vmid);
 		goto out;
+	}
+
+	if (!init_done) {
+		pr_err("%s: Driver probe failed\n", __func__);
+		return -ENXIO;
 	}
 
 	if (is_vpm_group_info_populated) {
