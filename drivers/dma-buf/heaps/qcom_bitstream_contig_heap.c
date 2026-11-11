@@ -9,6 +9,7 @@
 #include <linux/dma-heap.h>
 #include <linux/err.h>
 #include <linux/errno.h>
+#include <linux/module.h>
 #include <linux/moduleparam.h>
 
 #include <linux/mem-buf.h>
@@ -87,3 +88,6 @@ int qcom_add_bitstream_contig_heap(char *name)
 }
 
 module_param(enable_bitstream_contig_heap, bool, 0);
+
+/* dma_buf_put() is in the DMA_BUF namespace on 6.6 */
+MODULE_IMPORT_NS(DMA_BUF);
