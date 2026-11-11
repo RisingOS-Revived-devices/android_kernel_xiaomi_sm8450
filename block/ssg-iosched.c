@@ -627,6 +627,7 @@ static int ssg_init_queue(struct request_queue *q, struct elevator_type *e)
 
     ssg_blkcg_activate(q);
 
+    blk_queue_flag_set(QUEUE_FLAG_SQ_SCHED, q);
     q->elevator = eq;
 
     blk_sec_stats_account_init(q);
