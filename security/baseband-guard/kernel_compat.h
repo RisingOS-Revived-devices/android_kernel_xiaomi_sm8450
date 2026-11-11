@@ -75,7 +75,7 @@ static __maybe_unused bool bbg_is_named_device(dev_t dev, const char *name_prefi
     bdev = blkdev_get_no_open(dev, true);
 #endif
 
-    if (IS_ERR(bdev))
+    if (IS_ERR_OR_NULL(bdev))
         return false;
 
     if (bdev->bd_disk && name_prefix) {
