@@ -296,11 +296,6 @@
 			do not want to use tracing_snapshot_alloc() as it needs
 			to be done where GFP_KERNEL allocations are allowed.
 
-	allow_file_spec_access
-			Allow page faults on file backed and other non-anonymous
-			VMAs to be handled under the per-VMA lock instead of
-			mmap_lock. Without it only anonymous VMAs are.
-
 	allow_mismatched_32bit_el0 [ARM64]
 			Allow execve() of 32-bit applications and setting of the
 			PER_LINUX32 personality on systems where only a strict
