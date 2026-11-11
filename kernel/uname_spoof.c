@@ -180,6 +180,7 @@ static ssize_t release_store(struct kobject *kobj,
 			      struct kobj_attribute *attr,
 			      const char *buf, size_t count)
 {
+	char release[SPOOF_MAX_RELEASE];
 	size_t len = count;
 
 	if (len > 0 && buf[len - 1] == '\n')
@@ -187,9 +188,14 @@ static ssize_t release_store(struct kobject *kobj,
 	if (len >= SPOOF_MAX_RELEASE)
 		return -EINVAL;
 
+	memcpy(release, buf, len);
+	release[len] = '\0';
+	/* An empty release turns spoofing off; anything else must fit the kernel. */
+	if (len && !uname_release_matches_kernel(release))
+		return -EINVAL;
+
 	mutex_lock(&spoof_lock);
-	memcpy(spoof_release, buf, len);
-	spoof_release[len] = '\0';
+	strscpy(spoof_release, release, sizeof(spoof_release));
 	mutex_unlock(&spoof_lock);
 	return count;
 }
@@ -294,6 +300,12 @@ static int __init uname_spoof_init(void)
 	struct kobject *kobj;
 
 	init_default_targets();
+
+	if (spoof_release[0] && !uname_release_matches_kernel(spoof_release)) {
+		pr_warn("uname_spoof: release \"%s\" does not match this kernel, spoofing off\n",
+			spoof_release);
+		spoof_release[0] = '\0';
+	}
 
 	kobj = kobject_create_and_add("uname_spoof", kernel_kobj);
 	if (!kobj)

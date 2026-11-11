@@ -11,6 +11,7 @@
 #include <linux/uaccess.h>
 #include <linux/version.h>
 #include <linux/utsname.h> // utsname() and uts_sem
+#include <linux/uname_spoof.h>
 
 #include "uapi/supercall.h"
 #include "supercall/internal.h"
@@ -234,6 +235,11 @@ int ksu_handle_toolkit_reboot(int magic2, unsigned int cmd, void __user *arg)
         if (!strcmp(release_buf, "default") || !strcmp(version_buf, "default")) {
             memcpy(release_buf, toolkit_orig_release, sizeof(release_buf));
             memcpy(version_buf, toolkit_orig_version, sizeof(version_buf));
+        }
+
+        if (!uname_release_matches_kernel(release_buf)) {
+            pr_info("toolkit: release '%s' does not match this kernel, refusing\n", release_buf);
+            return -EINVAL;
         }
 
         struct new_utsname *u = utsname();

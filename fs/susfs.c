@@ -26,6 +26,7 @@
 #include <linux/rcupdate.h>
 #include <linux/string.h>
 #include <linux/susfs.h>
+#include <linux/uname_spoof.h>
 #include "fuse/fuse_i.h"
 #include "mount.h"
 
@@ -776,6 +777,15 @@ void susfs_set_uname(void __user **user_info) {
 
 	if (*info.release == '\0' || *info.version == '\0') {
 		info.err = -EFAULT;
+		goto out_copy_to_user;
+	}
+
+	info.release[sizeof(info.release) - 1] = '\0';
+	if (strcmp(info.release, "default") &&
+	    !uname_release_matches_kernel(info.release)) {
+		SUSFS_LOGE("refusing release '%s', it does not match this kernel\n",
+			   info.release);
+		info.err = -EINVAL;
 		goto out_copy_to_user;
 	}
 
