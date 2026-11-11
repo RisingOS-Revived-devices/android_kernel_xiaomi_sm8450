@@ -561,6 +561,7 @@ int gh_rm_unpopulate_hyp_res(gh_vmid_t vmid, const char *vm_name)
 		return PTR_ERR(res_entries);
 
 	for (i = 0; i < n_res; i++) {
+		irq = -1;
 		label = res_entries[i].resource_label;
 		cap_id = (u64) res_entries[i].cap_id_high << 32 |
 				res_entries[i].cap_id_low;
