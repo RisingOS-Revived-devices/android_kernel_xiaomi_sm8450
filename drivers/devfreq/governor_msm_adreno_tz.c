@@ -439,10 +439,8 @@ static int tz_get_target_freq(struct devfreq *devfreq, unsigned long *freq)
 			priv->bin.busy_time, context_count, priv);
 	}
 
-	#if 0
 	priv->bin.total_time = 0;
 	priv->bin.busy_time = 0;
-	#endif
 
 	/*
 	 * If the decision is to move to a different level, make sure the GPU
