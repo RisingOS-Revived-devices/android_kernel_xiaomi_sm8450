@@ -6,6 +6,14 @@
 
 #include "blk-cgroup.h"
 
+/* container_of_safe() left the kernel in 848dba781f19; SSG still uses it. */
+#ifndef container_of_safe
+#define container_of_safe(ptr, type, member)				\
+	({ void *__mptr = (void *)(ptr);				\
+	IS_ERR_OR_NULL(__mptr) ? ERR_CAST(__mptr) :			\
+		((type *)(__mptr - offsetof(type, member))); })
+#endif
+
 #ifdef CONFIG_BLK_CGROUP
 /* blkcg of the kthread or current task, like the private blkcg_css() */
 static inline struct blkcg *ssg_current_blkcg(void)

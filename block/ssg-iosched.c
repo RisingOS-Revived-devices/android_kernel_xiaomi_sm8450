@@ -10,8 +10,8 @@
 #include <linux/kernel.h>
 #include <linux/fs.h>
 #include <linux/blkdev.h>
+#include <linux/backing-dev.h>
 #include <linux/blk-mq.h>
-#include <linux/elevator.h>
 #include <linux/bio.h>
 #include <linux/module.h>
 #include <linux/slab.h>
