@@ -2466,10 +2466,13 @@ static void __init rfx_selfcheck(void)
 	 * Cap is two frame gaps (RFX_EMA_MAX_STEPS periods), so a 120fps
 	 * inter-frame gap steps out within the cap and a longer gap lands
 	 * on the discard. */
+	ns = t - ((u64)RFX_EMA_MAX_STEPS * RFX_EMA_DECAY_PERIOD_NS);
+	gate = rfx_ema(1000, 0, t, &ns, true);
+	WARN_ON(gate >= 1000 || ns != t);
+	/* Decay is geometric (1/DIVISOR of the remaining error per period), so
+	 * compare against the exact cap rather than a linear estimate. */
 	ns = t - ((u64)(RFX_EMA_MAX_STEPS + 1) * RFX_EMA_DECAY_PERIOD_NS);
-	WARN_ON(rfx_ema(1000, 0, t, &ns, true) !=
-		1000 - RFX_EMA_MAX_STEPS * 1000 / RFX_EMA_GAMING_DIVISOR ||
-		ns != t);
+	WARN_ON(rfx_ema(1000, 0, t, &ns, true) != gate || ns != t);
 
 	/* Gaming headroom ramp: nothing at the gate, something above it (a ramp
 	 * truncated to whole percent would give zero there), never past
@@ -2660,9 +2663,9 @@ static void __init rfx_selfcheck(void)
 	/* Quiet re-arm needs the full quiet run, so a short lull does not
 	 * re-arm and the full one does. */
 	memset(&p, 0, sizeof(p));
+	/* The first quiet eval only stamps the start of the run. */
 	rfx_warmup_rearm_quiet(&p, RFX_GAMING_WARMUP_TRIGGER_PCT - 1, t);
-	WARN_ON(p.gaming_warmup_pending != true);
-	p.gaming_warmup_pending = false;
+	WARN_ON(p.gaming_warmup_pending || p.quiet_since_ns != t);
 	rfx_warmup_rearm_quiet(&p, RFX_GAMING_WARMUP_TRIGGER_PCT - 1, t);
 	/* Just under the quiet-run threshold: does not re-arm. */
 	rfx_warmup_rearm_quiet(&p, RFX_GAMING_WARMUP_TRIGGER_PCT - 1,
