@@ -1951,7 +1951,6 @@
   __stack_chk_fail
   stack_depot_fetch
   stack_trace_print
-  state_suspended_1
   static_key_disable
   stop_machine
   stop_one_cpu
