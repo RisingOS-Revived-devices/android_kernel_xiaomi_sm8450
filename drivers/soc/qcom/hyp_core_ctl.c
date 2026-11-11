@@ -959,7 +959,7 @@ static int find_alternate_best_cpus_and_affine(unsigned long cap_id, int *cpu,
 	} else {
 		ret = gh_hcall_vcpu_affinity_set(cap_id, *cpu);
 		if (ret) {
-			pr_err("fail to assign pcpu for vcpu# err=%d cap_id=%llu pcpu=%d\n",
+			pr_err("fail to assign pcpu for vcpu# err=%d cap_id=%lu pcpu=%d\n",
 						ret, cap_id, *cpu);
 			ret = -ENXIO;
 		} else {

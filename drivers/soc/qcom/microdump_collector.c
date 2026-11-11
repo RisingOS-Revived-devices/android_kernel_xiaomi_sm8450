@@ -215,7 +215,7 @@ static int microdump_crash_collection(void)
 	}
 
 	if (IS_ERR(crash_reason)) {
-		pr_err("%s: smem %d not available because of %d\n",
+		pr_err("%s: smem %d not available because of %ld\n",
 			__func__, SMEM_SSR_REASON_MSS0, PTR_ERR(crash_reason));
 
 		goto out;
