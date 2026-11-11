@@ -5,6 +5,7 @@ clk-rpmh.ko
 gcc-waipio.ko
 icc-rpmh.ko
 qcom-ipcc.ko
+qcom_ipc_logging.ko
 qcom-pdc.ko
 qcom_tsens.ko
 rpmh-regulator.ko
