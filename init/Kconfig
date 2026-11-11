@@ -244,7 +244,7 @@ config UNAME_SPOOF_RELEASE
 	default ""
 	help
 	  The kernel release string returned by uname() for targeted processes.
-	  Example: 5.10.226-android12-9-00064-gea4a6f067d3f-ab12969919
+	  Example: 6.6.143-android15-8-g1a04d7d18c1d-ab16867777-4k
 	  Can be changed at runtime via /sys/kernel/uname_spoof/release.
 
 config UNAME_SPOOF_VERSION
