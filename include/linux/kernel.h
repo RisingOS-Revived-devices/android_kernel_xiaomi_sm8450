@@ -311,7 +311,7 @@ do {									\
  */
 
 #ifdef CONFIG_DISABLE_TRACE_PRINTK
-#define trace_printk pr_debug
+#define trace_printk(fmt, ...) pr_debug(fmt, ##__VA_ARGS__)
 #else
 #define trace_printk(fmt, ...)				\
 do {							\
