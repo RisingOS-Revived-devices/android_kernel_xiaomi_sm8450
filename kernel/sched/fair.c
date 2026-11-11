@@ -13714,6 +13714,8 @@ static void switched_to_fair(struct rq *rq, struct task_struct *p)
 	 * of a switched-in task may carry (upstream 7.0.0 reset_task_bore).
 	 */
 	reset_task_bore(p);
+	/* set_load_weight() ran with the pre-reset score: resync the weight */
+	reweight_task_by_prio(p, effective_prio_bore(p));
 #endif /* CONFIG_SCHED_BORE */
 
 	if (task_on_rq_queued(p)) {
