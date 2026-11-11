@@ -987,6 +987,12 @@ KBUILD_LDFLAGS += -mllvm -import-instr-limit=5
 # Set O3 optimization level for LTO
 KBUILD_LDFLAGS		+= --plugin-opt=O3
 KBUILD_LDFLAGS      += --lto-O3
+# O3 turns on AArch64 GlobalMerge for every global. pahole 1.25 drops the
+# offsets of merged variables, so .data..percpu gets duplicate VARs, the
+# kernel rejects vmlinux BTF and nf_conntrack/nf_nat init fail and panic.
+ifeq ($(SRCARCH),arm64)
+KBUILD_LDFLAGS		+= -mllvm -aarch64-enable-global-merge=false
+endif
 
 # Check for frame size exceeding threshold during prolog/epilog insertion
 # when using lld < 13.0.0.
