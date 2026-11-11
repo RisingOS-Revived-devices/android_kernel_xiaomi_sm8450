@@ -177,10 +177,6 @@ bad_bmap:
 	goto out;
 }
 
-/*
- * We may have stale swap cache pages in memory: notice
- * them here and get rid of the unnecessary final write.
- */
 #define KCOMPRESS_FIFO_SIZE 256
 
 struct kcompress_t {
@@ -218,6 +214,10 @@ static bool swap_sched_async_compress(struct folio *folio)
 	return false;
 }
 
+/*
+ * We may have stale swap cache pages in memory: notice
+ * them here and get rid of the unnecessary final write.
+ */
 int swap_writepage(struct page *page, struct writeback_control *wbc)
 {
 	struct folio *folio = page_folio(page);
