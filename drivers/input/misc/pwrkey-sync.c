@@ -69,7 +69,7 @@ static DECLARE_DELAYED_WORK(pwrkey_sync_panic_worker, pwrkey_sync_panic_work);
 static void pwrkey_sync_input_event(struct input_handle *handle,
 				    unsigned int type, unsigned int code, int value)
 {
-	if (type != EV_KEY)
+	if (type != EV_KEY || code != KEY_POWER)
 		return;
 
 	switch (value) {
