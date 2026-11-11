@@ -254,8 +254,8 @@ config UNAME_SPOOF_VERSION
 	help
 	  The full version string (uname -v, includes the stock build
 	  timestamp) returned to targeted processes. Leave empty to keep
-	  the real one. All other processes keep seeing the real build,
-	  which carries a WIB timestamp.
+	  the real one. All other processes keep seeing the real build
+	  timestamp.
 	  Example: #1 SMP PREEMPT Mon Jul 27 19:07:03 UTC 2026
 	  Can be changed at runtime via /sys/kernel/uname_spoof/version.
 

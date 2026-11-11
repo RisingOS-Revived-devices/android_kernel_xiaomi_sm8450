@@ -205,8 +205,4 @@ elif [ "${LOCALVERSION+set}" != "set" ]; then
 	scm_version="$(scm_version --short)"
 fi
 
-res="${KERNELVERSION}${file_localversion}${config_localversion}${LOCALVERSION}${scm_version}"
-# 5.10 used LOCALVERSION "-gki" and stripped "-gki+"; 6.6 has no "-gki",
-# so also drop the bare "+" the 5.10 strip removed with it.
-res=$(printf "%s" "$res" | sed -e "s/-gki+//" -e "s/+$//")
-echo "$res"
+echo "${KERNELVERSION}${file_localversion}${config_localversion}${LOCALVERSION}${scm_version}"
