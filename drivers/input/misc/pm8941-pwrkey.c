@@ -245,7 +245,7 @@ static irqreturn_t pm8941_pwrkey_irq(int irq, void *_data)
 
 	if (pwrkey->log_kpd_event)
 		pr_info_ratelimited("PMIC input: KPDPWR status=0x%02x, KPDPWR_ON=%d\n",
-			sts, (sts & PON_KPDPWR_N_SET));
+			sts, !!(sts & pwrkey->data->status_bit));
 
 	/*
 	 * Simulate a press event in case a release event occurred without a
@@ -458,7 +458,11 @@ static int pm8941_pwrkey_probe(struct platform_device *pdev)
 		}
 	}
 
-	pwrkey->log_kpd_event = of_property_read_bool(pdev->dev.of_node, "qcom,log-kpd-event");
+	/* waipio puts qcom,log-kpd-event on the PON parent; log the power key only, not resin/bark */
+	pwrkey->log_kpd_event = (!strcmp(pwrkey->data->name, "pmic_pwrkey") ||
+				 !strcmp(pwrkey->data->name, "pm8941_pwrkey")) &&
+		(of_property_read_bool(pdev->dev.of_node, "qcom,log-kpd-event") ||
+		 of_property_read_bool(parent->of_node, "qcom,log-kpd-event"));
 
 	if (pwrkey->log_kpd_event) {
 		error = regmap_read(pwrkey->regmap,
@@ -467,7 +471,7 @@ static int pm8941_pwrkey_probe(struct platform_device *pdev)
 			dev_err(&pdev->dev, "failed to read PON_RT_STS rc=%d\n", error);
 		else
 			pr_info("KPDPWR status at init=0x%02x, KPDPWR_ON=%d\n",
-				sts, (sts & PON_KPDPWR_N_SET));
+				sts, !!(sts & pwrkey->data->status_bit));
 	}
 
 	error = devm_request_threaded_irq(&pdev->dev, pwrkey->irq,
