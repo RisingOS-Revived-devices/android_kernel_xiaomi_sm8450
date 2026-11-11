@@ -1593,6 +1593,9 @@
   qcom_smem_state_update_bits
   queue_delayed_work_on
   queue_work_on
+  queued_read_lock_slowpath
+  queued_spin_lock_slowpath
+  queued_write_lock_slowpath
   radix_tree_insert
   radix_tree_iter_delete
   radix_tree_lookup
